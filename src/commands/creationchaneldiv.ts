@@ -15,6 +15,7 @@ import { createTeamResourcesForDivisionOnGuild } from '../modules/divisions/crea
 import { createOrSyncTeamVoiceChannel } from '../modules/divisions/createOrSyncTeamVoiceChannel.js';
 import { groupLabelToSortKey, formatDivisionChannelName } from '../modules/divisions/utils.js';
 import { divisionsLogger } from '../modules/divisions/logger.js';
+import { sendAuditLog, buildAuditMessage, AUDIT_PREFIX } from '../audit/index.js';
 
 function userHasStaffRole(interaction: ChatInputCommandInteraction): boolean {
   const member = interaction.member;
@@ -104,6 +105,16 @@ export async function handleCreationchaneldivCommand(
   let channelsCreated = 0;
   let channelsMoved = 0;
   let voiceChannelsSynced = 0;
+
+  const client = interaction.client;
+  await sendAuditLog(
+    client,
+    buildAuditMessage(
+      'info',
+      AUDIT_PREFIX.DIVISIONS,
+      `Division ${divisionNumber} — Création / organisation démarrée (${teams.length} équipes).`
+    )
+  );
 
   try {
     if (isServer1) {
@@ -225,6 +236,25 @@ export async function handleCreationchaneldivCommand(
 
     const content = truncateReply(lines.join('\n'));
     await interaction.editReply({ content }).catch(() => {});
+
+    const auditParts = [
+      `Commande /creationchaneldiv terminée — division ${divisionNumber}`,
+      `— équipes : ${teams.length}`,
+    ];
+    if (isServer1) {
+      auditParts.push(`— salons déplacés : ${channelsMoved}`);
+      auditParts.push(`— vocaux synchronisés : ${voiceChannelsSynced}`);
+    } else {
+      auditParts.push(`— rôles créés : ${rolesCreated}`);
+      auditParts.push(`— salons créés : ${channelsCreated}`);
+      auditParts.push(`— vocaux synchronisés : ${voiceChannelsSynced}`);
+    }
+    if (allWarnings.length > 0) auditParts.push(`— warnings : ${allWarnings.length}`);
+    if (allErrors.length > 0) auditParts.push(`— erreurs : ${allErrors.length}`);
+    await sendAuditLog(
+      client,
+      buildAuditMessage('success', AUDIT_PREFIX.DIVISIONS, auditParts.join(' '))
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     divisionsLogger.error('creationchaneldiv: erreur', {
@@ -235,5 +265,13 @@ export async function handleCreationchaneldivCommand(
     await interaction.editReply({
       content: `Erreur lors de l'exécution : ${message}`,
     }).catch(() => {});
+    await sendAuditLog(
+      client,
+      buildAuditMessage(
+        'error',
+        AUDIT_PREFIX.DIVISIONS,
+        `Division ${divisionNumber} — Erreur lors de l'exécution — ${message}`
+      )
+    );
   }
 }

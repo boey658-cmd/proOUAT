@@ -5,6 +5,7 @@
 import type { ChatInputCommandInteraction } from 'discord.js';
 import { getAllowedStaffRoleIds } from '../config/index.js';
 import { syncDivisionsFromCalendar } from '../modules/divisions/syncDivisionsFromCalendar.js';
+import { sendAuditLog, buildAuditMessage, AUDIT_PREFIX } from '../audit/index.js';
 
 function userHasStaffRole(interaction: ChatInputCommandInteraction): boolean {
   const member = interaction.member;
@@ -65,14 +66,38 @@ export async function handleSyncdivCommand(
 
   await interaction.deferReply({ ephemeral: true });
 
+  const client = interaction.client;
+  await sendAuditLog(
+    client,
+    buildAuditMessage('info', AUDIT_PREFIX.DIVISIONS, 'Synchronisation des divisions depuis le calendrier démarrée.')
+  );
+
   try {
     const result = await syncDivisionsFromCalendar();
     const content = formatReply(result);
     await interaction.editReply({ content }).catch(() => {});
+
+    const auditLine = buildAuditMessage(
+      'success',
+      AUDIT_PREFIX.DIVISIONS,
+      [
+        'Sync divisions terminée',
+        `— ${result.totalEntries} entrée(s) calendrier`,
+        `— ${result.matchedTeams} équipe(s) trouvée(s) en base`,
+        `— ${result.updatedTeams} mise(s) à jour`,
+        `— ${result.anomalies.length} anomalie(s)`,
+        `— ${result.errors.length} erreur(s)`,
+      ].join(' ')
+    );
+    await sendAuditLog(client, auditLine);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await interaction.editReply({
       content: `Erreur lors de la synchronisation : ${message}`,
     }).catch(() => {});
+    await sendAuditLog(
+      client,
+      buildAuditMessage('error', AUDIT_PREFIX.DIVISIONS, `Erreur lors de la synchronisation — ${message}`)
+    );
   }
 }

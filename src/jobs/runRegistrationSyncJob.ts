@@ -21,6 +21,7 @@ import {
 } from '../config/index.js';
 import { tryAcquireJobLock, releaseJobLock } from '../core/jobs/jobLock.js';
 import { createJobLogger } from '../core/jobs/jobLogger.js';
+import { sendAuditLog, buildAuditMessage, AUDIT_PREFIX } from '../audit/index.js';
 
 const JOB_NAME = 'registrationSync';
 
@@ -81,9 +82,17 @@ export async function runRegistrationSyncJob(
   }
 
   try {
-    logger.info('Début du job');
-
     const slug = getTournamentSlug();
+    logger.info('Début du job');
+    await sendAuditLog(
+      client,
+      buildAuditMessage(
+        'info',
+        AUDIT_PREFIX.REGISTRATION_SYNC,
+        `Début du scan des inscriptions — tournoi : ${slug}`
+      )
+    );
+
     const scanResult = await scanTournamentRegistrations(slug);
 
     const scannedTeams = scanResult.teams.length;
@@ -95,12 +104,25 @@ export async function runRegistrationSyncJob(
       logger.info('Fin du job (aucune équipe à synchroniser)', {
         scanErrors: scanResult.errors.length,
       });
+      const msg =
+        scanResult.errors.length > 0
+          ? `Fin du scan — 0 équipe à synchroniser (tournoi : ${slug}) — ${scanResult.errors.length} erreur(s) lors du scan.`
+          : `Fin du scan — 0 équipe à synchroniser (tournoi : ${slug}).`;
+      await sendAuditLog(
+        client,
+        buildAuditMessage('info', AUDIT_PREFIX.REGISTRATION_SYNC, msg)
+      );
       return {
         ...emptyResult(false),
         errors,
         durationMs: Date.now() - startTime,
       };
     }
+
+    logger.info('Équipes détectées dans le tournoi', {
+      count: scannedTeams,
+      scanErrors: scanResult.errors.length,
+    });
 
     const totalRefsAttempted = scanResult.teams.length + scanResult.errors.length;
     const scanSuccessRatio =
@@ -112,6 +134,14 @@ export async function runRegistrationSyncJob(
         errors: scanResult.errors.length,
         totalRefs: totalRefsAttempted,
       });
+      await sendAuditLog(
+        client,
+        buildAuditMessage(
+          'warn',
+          AUDIT_PREFIX.REGISTRATION_SYNC,
+          `Scan dégradé détecté — suppressions désactivées pour ce run (${scanResult.errors.length} erreur(s) scan).`
+        )
+      );
     }
 
     const syncResult = syncTeamsWithDatabase(scanResult.teams, {
@@ -120,6 +150,13 @@ export async function runRegistrationSyncJob(
     syncResult.errors.forEach(
       (e) => errors.push(`[sync] ${e.team_api_id} - ${e.message}`)
     );
+
+    logger.info('Synchronisation base terminée', {
+      created: syncResult.created,
+      updated: syncResult.updated,
+      removed: syncResult.removedTeams.length,
+      reactivated: syncResult.reactivated,
+    });
 
     let notified = 0;
     let notifyFailed = 0;
@@ -197,6 +234,36 @@ export async function runRegistrationSyncJob(
     };
     logger.info('Fin du job', summary);
 
+    const durationSec = Math.round(durationMs / 1000);
+    const auditLine = buildAuditMessage(
+      'success',
+      AUDIT_PREFIX.REGISTRATION_SYNC,
+      [
+        'Terminé',
+        `— tournoi : ${slug}`,
+        `— scannées : ${scannedTeams}`,
+        `— créées : ${syncResult.created}`,
+        `— mises à jour : ${syncResult.updated}`,
+        `— supprimées : ${syncResult.removedTeams.length}`,
+        `— réactivées : ${syncResult.reactivated}`,
+        `— notifications : ${notified} envoyées`,
+        `— Google Sheets : ${googleSheetsSent} succès / ${googleSheetsFailed} échec`,
+        `— durée : ${durationSec} s`,
+      ].join(' ')
+    );
+    await sendAuditLog(client, auditLine);
+    if (errors.length > 0) {
+      const errPreview = errors.slice(0, 3).join(' ; ');
+      await sendAuditLog(
+        client,
+        buildAuditMessage(
+          'error',
+          AUDIT_PREFIX.REGISTRATION_SYNC,
+          `Erreurs (${errors.length}) — ${errPreview}${errors.length > 3 ? '…' : ''}`
+        )
+      );
+    }
+
     const intervalMs = getRegistrationSyncIntervalMinutes() * 60 * 1000;
     if (intervalMs > 0 && durationMs > intervalMs * 0.8) {
       logger.warn('Job a dépassé 80% de l\'intervalle', { durationMs, intervalMs });
@@ -224,6 +291,14 @@ export async function runRegistrationSyncJob(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logger.error('Erreur globale du job', { message });
+    await sendAuditLog(
+      client,
+      buildAuditMessage(
+        'error',
+        AUDIT_PREFIX.REGISTRATION_SYNC,
+        `Erreur lors du sync inscriptions — ${message}`
+      )
+    );
     return {
       ...emptyResult(false),
       errors: [message],

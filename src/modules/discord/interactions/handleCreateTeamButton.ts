@@ -22,6 +22,7 @@ import {
 import { archiveCreatedTeamMessage } from '../messages/archiveCreatedTeamMessage.js';
 import { deleteOriginalCreateTeamMessage } from '../messages/deleteOriginalCreateTeamMessage.js';
 import { discordLogger } from '../logger.js';
+import { sendAuditLog, buildAuditMessage, AUDIT_PREFIX } from '../../../audit/index.js';
 
 export interface HandleCreateTeamResult {
   success: boolean;
@@ -289,6 +290,15 @@ export async function handleCreateTeamButton(
       roleId: roleId ?? null,
       degradedMode,
     });
+
+    const auditMsg = degradedMode
+      ? `Ressources Discord créées pour l'équipe **${team.team_name}** — salon créé (mode dégradé, rôle non créé).`
+      : `Ressources Discord créées pour l'équipe **${team.team_name}** — rôle créé, salon créé, catégorie utilisée.`;
+    await sendAuditLog(
+      interaction.client,
+      buildAuditMessage('success', AUDIT_PREFIX.CREATION_TEAM, auditMsg)
+    );
+
     return { success: true, message: reply, degradedMode };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -301,6 +311,19 @@ export async function handleCreateTeamButton(
     await interaction.editReply({
       content: `Erreur lors de la création : ${message}`,
     }).catch(() => {});
+
+    const causeHint = /permission|manage|channel/i.test(message)
+      ? ' — vérifier permissions Manage Channels'
+      : '';
+    await sendAuditLog(
+      interaction.client,
+      buildAuditMessage(
+        'error',
+        AUDIT_PREFIX.CREATION_TEAM,
+        `Échec création ressources Discord pour l'équipe **${team.team_name}** — ${message}${causeHint}`
+      )
+    );
+
     return { success: false, message };
   }
 }
