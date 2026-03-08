@@ -1,0 +1,23 @@
+{
+  "name": "proouat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "migrate": "tsx -e \"import { openDatabase } from './src/db/database.js'; import { runMigrations } from './src/db/migrate.js'; openDatabase(); const n = runMigrations(); console.log('Migrations applied:', n); process.exit(0);\""
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "better-sqlite3": "^11.6.0",
+    "discord.js": "^14.16.3",
+    "dotenv": "^17.3.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.10.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
