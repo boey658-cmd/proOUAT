@@ -64,17 +64,22 @@ async function trySetRolePositionAboveTarget(
   }
 }
 
+/** Couleur des rôles équipe (Discord). */
+const TEAM_ROLE_COLOR = 0x11806a;
+
 /**
- * Crée un rôle équipe (nom dérivé du nom d'équipe, sans permissions sensibles, mentionnable).
+ * Crée un rôle équipe (nom dérivé du nom d'équipe : slug puis espaces + MAJ, couleur #11806a, mentionnable).
  * Tente de le placer juste au-dessus du rôle configuré (TEAM_ROLE_POSITION_ABOVE_ROLE_ID) si défini.
  */
 export async function createTeamRole(guild: Guild, teamName: string): Promise<string> {
   const name = slugifyRoleName(teamName);
+  const roleDisplayName = (name || 'equipe').replace(/-/g, ' ').toUpperCase();
   const role = await guild.roles.create({
-    name: name || 'equipe',
+    name: roleDisplayName,
+    color: TEAM_ROLE_COLOR,
     permissions: [],
     mentionable: true,
-    reason: 'Création équipe inscription',
+    reason: `Team role for ${roleDisplayName}`,
   });
   discordLogger.info('createTeamRole: rôle créé', {
     guildId: guild.id,
