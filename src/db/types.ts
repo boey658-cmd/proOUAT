@@ -35,6 +35,8 @@ export interface PlayerRow {
   discord_username_snapshot: string | null;
   status: PlayerStatus;
   is_captain: number;
+  /** 1 = staff (équipe), 0 = joueur. Utilisé pour la synchro des rôles Discord et les logs. */
+  is_staff?: number;
   created_at: string;
   updated_at: string;
 }

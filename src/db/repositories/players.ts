@@ -15,9 +15,9 @@ export function insertPlayer(row: PlayerInsert): number {
   const stmt = db.prepare(`
     INSERT INTO players (
       player_api_id, team_id, lol_pseudo, normalized_lol_pseudo,
-      discord_user_id, discord_username_snapshot, status, is_captain,
+      discord_user_id, discord_username_snapshot, status, is_captain, is_staff,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const info = stmt.run(
     row.player_api_id ?? null,
@@ -28,6 +28,7 @@ export function insertPlayer(row: PlayerInsert): number {
     row.discord_username_snapshot ?? null,
     row.status,
     row.is_captain ?? 0,
+    row.is_staff ?? 0,
     row.created_at,
     row.updated_at
   );

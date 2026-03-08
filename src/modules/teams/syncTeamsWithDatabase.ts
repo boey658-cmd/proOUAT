@@ -137,6 +137,23 @@ function insertTeamAndPlayers(normalized: NormalizedTeam): number {
       discord_username_snapshot: p.discord_username_snapshot ?? null,
       status: playerStatus(p),
       is_captain: p.is_captain ? 1 : 0,
+      is_staff: 0,
+      created_at: ts,
+      updated_at: ts,
+    });
+  }
+  const staffList = normalized.staff ?? [];
+  for (const s of staffList) {
+    playersRepo.insertPlayer({
+      player_api_id: `staff-${s.player_api_id ?? ''}`,
+      team_id: teamId,
+      lol_pseudo: s.lol_pseudo,
+      normalized_lol_pseudo: s.normalized_lol_pseudo,
+      discord_user_id: s.discord_user_id ?? null,
+      discord_username_snapshot: s.discord_username_snapshot ?? null,
+      status: playerStatus(s),
+      is_captain: 0,
+      is_staff: 1,
       created_at: ts,
       updated_at: ts,
     });
@@ -150,8 +167,13 @@ function updateTeamAndPlayers(
   normalized: NormalizedTeam
 ): { hadChanges: boolean; diff: TeamUpdateDiff | null } {
   const ts = now();
-  const existingPlayers = playersRepo.findPlayersByTeamId(existingTeamId);
+  const allMembers = playersRepo.findPlayersByTeamId(existingTeamId);
+  const existingPlayers = allMembers.filter((r) => (r.is_staff ?? 0) === 0);
+  const existingStaff = allMembers.filter((r) => (r.is_staff ?? 0) === 1);
   const currentKeys = new Set(normalized.players.map(playerKey));
+  const currentStaffKeys = new Set(
+    (normalized.staff ?? []).map((s) => `staff-${s.player_api_id ?? ''}`)
+  );
 
   let nameChanged = false;
   let oldTeamName: string | undefined;
@@ -194,11 +216,18 @@ function updateTeamAndPlayers(
     if (Object.keys(updates).length > 0) playerUpdates.push({ row, normalized, updates });
   }
 
+  const newStaffList = (normalized.staff ?? []).filter(
+    (s) => !existingStaff.some((e) => e.player_api_id === `staff-${s.player_api_id ?? ''}`)
+  );
+  const leftStaffRows = existingStaff.filter((r) => !currentStaffKeys.has(r.player_api_id ?? ''));
+
   const hasContentChange =
     nameChanged ||
     newPlayers.length > 0 ||
     leftPlayerRows.length > 0 ||
-    playerUpdates.length > 0;
+    playerUpdates.length > 0 ||
+    newStaffList.length > 0 ||
+    leftStaffRows.length > 0;
 
   const discordIdChanges: TeamUpdateDiscordIdChange[] = playerUpdates
     .filter(({ updates }) => updates.discord_user_id !== undefined)
@@ -257,12 +286,32 @@ function updateTeamAndPlayers(
       discord_username_snapshot: p.discord_username_snapshot ?? null,
       status: playerStatus(p),
       is_captain: p.is_captain ? 1 : 0,
+      is_staff: 0,
       created_at: ts,
       updated_at: ts,
     });
   }
   for (const { row, updates } of playerUpdates) {
     playersRepo.updatePlayer(row.id, updates);
+  }
+
+  for (const row of leftStaffRows) {
+    playersRepo.updatePlayer(row.id, { status: 'left_team' });
+  }
+  for (const s of newStaffList) {
+    playersRepo.insertPlayer({
+      player_api_id: `staff-${s.player_api_id ?? ''}`,
+      team_id: existingTeamId,
+      lol_pseudo: s.lol_pseudo,
+      normalized_lol_pseudo: s.normalized_lol_pseudo,
+      discord_user_id: s.discord_user_id ?? null,
+      discord_username_snapshot: s.discord_username_snapshot ?? null,
+      status: playerStatus(s),
+      is_captain: 0,
+      is_staff: 1,
+      created_at: ts,
+      updated_at: ts,
+    });
   }
 
   return { hadChanges: hasContentChange || nameChanged, diff };

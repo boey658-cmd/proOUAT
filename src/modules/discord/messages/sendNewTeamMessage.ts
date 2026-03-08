@@ -14,29 +14,40 @@ import * as teamsRepo from '../../../db/repositories/teams.js';
 import * as teamDiscordStateRepo from '../../../db/repositories/teamDiscordState.js';
 
 /**
+ * Enrichit un membre (joueur ou staff) avec la présence Discord sur le serveur (discord_member_found).
+ */
+async function enrichMemberPresence(
+  p: NormalizedPlayer,
+  guild: Guild
+): Promise<NormalizedPlayer> {
+  const discordId = p.discord_user_id?.trim();
+  if (!discordId) {
+    return { ...p, discord_member_found: false };
+  }
+  try {
+    const member = await guild.members.fetch(discordId);
+    const found = member !== null && String(member.id) === String(discordId);
+    return { ...p, discord_member_found: found };
+  } catch {
+    return { ...p, discord_member_found: false };
+  }
+}
+
+/**
  * Enrichit l'équipe avec la présence Discord sur le serveur (discord_member_found).
- * Utilise le guild du salon pour vérifier si chaque joueur (discord_user_id) est membre.
+ * Vérifie joueurs et staff pour afficher correctement présent/absent dans l'embed.
  */
 async function enrichTeamWithPresence(
   team: NormalizedTeam,
   guild: Guild
 ): Promise<NormalizedTeam> {
-  const enrichedPlayers: NormalizedPlayer[] = await Promise.all(
-    team.players.map(async (p): Promise<NormalizedPlayer> => {
-      const discordId = p.discord_user_id?.trim();
-      if (!discordId) {
-        return { ...p, discord_member_found: false };
-      }
-      try {
-        const member = await guild.members.fetch(discordId);
-        const found = member !== null && String(member.id) === String(discordId);
-        return { ...p, discord_member_found: found };
-      } catch {
-        return { ...p, discord_member_found: false };
-      }
-    })
+  const enrichedPlayers = await Promise.all(
+    (team.players ?? []).map((p) => enrichMemberPresence(p, guild))
   );
-  return { ...team, players: enrichedPlayers };
+  const enrichedStaff = team.staff?.length
+    ? await Promise.all(team.staff.map((s) => enrichMemberPresence(s, guild)))
+    : undefined;
+  return { ...team, players: enrichedPlayers, staff: enrichedStaff };
 }
 
 /**
