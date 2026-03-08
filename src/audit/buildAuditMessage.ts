@@ -18,6 +18,8 @@ export const AUDIT_PREFIX = {
   DIVISIONS: '[Divisions]',
   CREATION_TEAM: '[Création Team]',
   DISCORD_RESOURCES: '[Discord Resources]',
+  MONITORING: '[Monitoring]',
+  BOT: '[Bot]',
 } as const;
 
 /**

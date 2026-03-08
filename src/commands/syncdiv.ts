@@ -6,6 +6,7 @@ import type { ChatInputCommandInteraction } from 'discord.js';
 import { getAllowedStaffRoleIds } from '../config/index.js';
 import { syncDivisionsFromCalendar } from '../modules/divisions/syncDivisionsFromCalendar.js';
 import { sendAuditLog, buildAuditMessage, AUDIT_PREFIX } from '../audit/index.js';
+import { notifyJobSuccess, notifyJobFailure } from '../monitoring/index.js';
 
 function userHasStaffRole(interaction: ChatInputCommandInteraction): boolean {
   const member = interaction.member;
@@ -90,8 +91,10 @@ export async function handleSyncdivCommand(
       ].join(' ')
     );
     await sendAuditLog(client, auditLine);
+    notifyJobSuccess(client, 'syncdiv');
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    await notifyJobFailure(client, 'syncdiv', err);
     await interaction.editReply({
       content: `Erreur lors de la synchronisation : ${message}`,
     }).catch(() => {});

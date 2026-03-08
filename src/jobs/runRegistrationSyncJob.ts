@@ -22,6 +22,7 @@ import {
 import { tryAcquireJobLock, releaseJobLock } from '../core/jobs/jobLock.js';
 import { createJobLogger } from '../core/jobs/jobLogger.js';
 import { sendAuditLog, buildAuditMessage, AUDIT_PREFIX } from '../audit/index.js';
+import { notifyJobSuccess, notifyJobFailure } from '../monitoring/index.js';
 
 const JOB_NAME = 'registrationSync';
 
@@ -112,6 +113,7 @@ export async function runRegistrationSyncJob(
         client,
         buildAuditMessage('info', AUDIT_PREFIX.REGISTRATION_SYNC, msg)
       );
+      notifyJobSuccess(client, 'registrationSync');
       return {
         ...emptyResult(false),
         errors,
@@ -252,6 +254,7 @@ export async function runRegistrationSyncJob(
       ].join(' ')
     );
     await sendAuditLog(client, auditLine);
+    notifyJobSuccess(client, 'registrationSync');
     if (errors.length > 0) {
       const errPreview = errors.slice(0, 3).join(' ; ');
       await sendAuditLog(
@@ -291,6 +294,7 @@ export async function runRegistrationSyncJob(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logger.error('Erreur globale du job', { message });
+    await notifyJobFailure(client, 'registrationSync', err);
     await sendAuditLog(
       client,
       buildAuditMessage(
