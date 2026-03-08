@@ -84,6 +84,7 @@ export async function createTeamResourcesForTeam(
       const role = await guild.roles.create({
         name: roleName.slice(0, 100),
         permissions: [],
+        mentionable: true,
         reason: 'Création division /creationchaneldiv (serveur secondaire)',
       });
       roleId = role.id;

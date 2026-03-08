@@ -31,8 +31,10 @@ export interface NormalizedTeam {
   team_name: string;
   /** Nom d'équipe normalisé. */
   normalized_team_name: string;
-  /** Liste des joueurs normalisés. */
+  /** Liste des joueurs normalisés (hors staff). */
   players: NormalizedPlayer[];
+  /** Liste du staff normalisé (optionnel, séparé des joueurs). */
+  staff?: NormalizedPlayer[];
 }
 
 /** Référence vers une équipe extraite du payload tournoi. */

@@ -59,3 +59,18 @@ export function isGuildIdAllowedForChannels(guildId: string): boolean {
   if (!g1 && !g2) return true;
   return g1 === guildId || g2 === guildId;
 }
+
+/** Rôle cible par défaut pour le positionnement des rôles équipe (au-dessus de ce rôle). */
+const DEFAULT_TEAM_ROLE_POSITION_ABOVE_ROLE_ID = '802883450070761473';
+
+/**
+ * ID du rôle Discord au-dessus duquel placer les rôles équipe créés par le bot.
+ * Si TEAM_ROLE_POSITION_ABOVE_ROLE_ID est défini dans .env, il est utilisé ; sinon la valeur par défaut.
+ * Pour désactiver le repositionnement : définir TEAM_ROLE_POSITION_ABOVE_ROLE_ID à une chaîne vide.
+ */
+export function getTeamRolePositionAboveRoleId(): string | null {
+  const id = getEnv('TEAM_ROLE_POSITION_ABOVE_ROLE_ID');
+  if (id !== undefined && id !== null && typeof id === 'string' && id.trim() === '') return null;
+  if (id && typeof id === 'string' && id.trim() !== '') return id.trim();
+  return DEFAULT_TEAM_ROLE_POSITION_ABOVE_ROLE_ID;
+}

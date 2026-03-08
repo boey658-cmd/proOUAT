@@ -294,65 +294,37 @@ function logTeamPayloadStructureDiagnostic(obj: Record<string, unknown>): void {
 }
 
 /**
- * Lit data.players et data.staffs à la racine, filtre leave === null, retourne les entrées actives + comptes.
+ * Lit data.players à la racine, filtre leave === null. Retourne uniquement les joueurs (pas le staff).
  */
-function getActivePlayersAndStaffs(obj: Record<string, unknown>): {
-  items: unknown[];
-  activePlayersCount: number;
-  activeStaffsCount: number;
-} {
-  let activePlayersCount = 0;
-  let activeStaffsCount = 0;
-  const merged: unknown[] = [];
-
+function getActivePlayerItems(obj: Record<string, unknown>): unknown[] {
+  const items: unknown[] = [];
   const players = obj['players'];
   if (Array.isArray(players)) {
     for (const item of players) {
-      if (isActiveMember(item)) {
-        merged.push(item);
-        activePlayersCount++;
-      }
+      if (isActiveMember(item)) items.push(item);
     }
   }
-
-  const staffs = obj['staffs'];
-  if (Array.isArray(staffs)) {
-    for (const item of staffs) {
-      if (isActiveMember(item)) {
-        merged.push(item);
-        activeStaffsCount++;
-      }
-    }
-  }
-
-  return { items: merged, activePlayersCount, activeStaffsCount };
+  return items;
 }
 
 /**
- * Extrait la liste des références joueurs depuis la réponse API équipe.
- * Lit en priorité data.players et data.staffs à la racine, filtre leave === null, utilise userId.
+ * Lit data.staffs à la racine, filtre leave === null. Retourne uniquement le staff.
  */
-export function extractPlayerRefsFromTeam(data: unknown): PlayerRef[] {
-  if (data === null || typeof data !== 'object') {
-    teamsLogger.debug('extractPlayerRefsFromTeam: payload non-object');
-    return [];
+function getActiveStaffItems(obj: Record<string, unknown>): unknown[] {
+  const items: unknown[] = [];
+  const staffs = obj['staffs'];
+  if (Array.isArray(staffs)) {
+    for (const item of staffs) {
+      if (isActiveMember(item)) items.push(item);
+    }
   }
-  const obj = data as Record<string, unknown>;
-  const { items: activeItems, activePlayersCount, activeStaffsCount } = getActivePlayersAndStaffs(obj);
+  return items;
+}
 
-  teamsLogger.info('extractPlayerRefsFromTeam: membres actifs', {
-    activePlayersCount,
-    activeStaffsCount,
-  });
-
-  if (activeItems.length === 0) {
-    logTeamPayloadStructureDiagnostic(obj);
-    return [];
-  }
-
+function mapItemsToPlayerRefs(items: unknown[]): PlayerRef[] {
   const refs: PlayerRef[] = [];
-  for (let i = 0; i < activeItems.length; i++) {
-    const item = activeItems[i];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
     const id = getPlayerIdFromItem(item);
     if (id !== null) {
       const pseudo = getPseudoFromItem(item);
@@ -364,8 +336,37 @@ export function extractPlayerRefsFromTeam(data: unknown): PlayerRef[] {
       });
     }
   }
-
   return refs;
+}
+
+/**
+ * Extrait les références joueurs depuis la réponse API équipe (data.players uniquement, pas le staff).
+ */
+export function extractPlayerRefsFromTeam(data: unknown): PlayerRef[] {
+  if (data === null || typeof data !== 'object') {
+    teamsLogger.debug('extractPlayerRefsFromTeam: payload non-object');
+    return [];
+  }
+  const obj = data as Record<string, unknown>;
+  const playerItems = getActivePlayerItems(obj);
+  teamsLogger.info('extractPlayerRefsFromTeam: joueurs actifs', { count: playerItems.length });
+  if (playerItems.length === 0) {
+    const staffItems = getActiveStaffItems(obj);
+    if (staffItems.length === 0) logTeamPayloadStructureDiagnostic(obj);
+    return [];
+  }
+  return mapItemsToPlayerRefs(playerItems);
+}
+
+/**
+ * Extrait les références staff depuis la réponse API équipe (data.staffs uniquement).
+ */
+export function extractStaffRefsFromTeam(data: unknown): PlayerRef[] {
+  if (data === null || typeof data !== 'object') return [];
+  const obj = data as Record<string, unknown>;
+  const staffItems = getActiveStaffItems(obj);
+  teamsLogger.info('extractStaffRefsFromTeam: staff actif', { count: staffItems.length });
+  return mapItemsToPlayerRefs(staffItems);
 }
 
 /**

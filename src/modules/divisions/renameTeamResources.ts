@@ -100,6 +100,16 @@ export async function renameTeamResources(
     if (role) {
       try {
         await role.setName(roleName, 'Renommage division /creationchaneldiv');
+        try {
+          await role.edit({ mentionable: true });
+        } catch (mentionErr) {
+          const msg = mentionErr instanceof Error ? mentionErr.message : String(mentionErr);
+          divisionsLogger.warn('renameTeamResources: rôle non rendu mentionnable', {
+            teamId: team.id,
+            roleId: role.id,
+            message: msg,
+          });
+        }
         result.roleRenamed = true;
         divisionsLogger.info('renameTeamResources: rôle renommé', {
           teamId: team.id,

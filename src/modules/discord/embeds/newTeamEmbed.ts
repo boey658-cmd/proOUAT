@@ -80,10 +80,26 @@ function formatPlayerLine(p: NormalizedPlayer): string {
  * Champ Joueurs (X) : liste avec icônes.
  */
 function formatPlayersField(team: NormalizedTeam): string {
-  if (team.players.length === 0) {
+  if (!team.players?.length) {
     return '*Aucun joueur*';
   }
   const lines = team.players.map(formatPlayerLine);
+  const value = lines.join('\n');
+  if (value.length > MAX_FIELD_VALUE_LENGTH) {
+    return value.slice(0, MAX_FIELD_VALUE_LENGTH - 3) + '...';
+  }
+  return value;
+}
+
+/**
+ * Champ Staff (X) : liste avec icônes (même format que joueurs).
+ */
+function formatStaffField(team: NormalizedTeam): string {
+  const staff = team.staff;
+  if (!staff?.length) {
+    return '*Aucun staff*';
+  }
+  const lines = staff.map(formatPlayerLine);
   const value = lines.join('\n');
   if (value.length > MAX_FIELD_VALUE_LENGTH) {
     return value.slice(0, MAX_FIELD_VALUE_LENGTH - 3) + '...';
@@ -102,22 +118,30 @@ export function buildNewTeamEmbed(
     ? new Date(options.detectedAt)
     : new Date();
 
+  const fields: { name: string; value: string; inline: boolean }[] = [
+    {
+      name: '👥 Équipe',
+      value: `**${normalizedTeam.team_name}**`,
+      inline: false,
+    },
+    {
+      name: `👥 Joueurs (${normalizedTeam.players?.length ?? 0})`,
+      value: formatPlayersField(normalizedTeam),
+      inline: false,
+    },
+  ];
+  if (normalizedTeam.staff?.length) {
+    fields.push({
+      name: `👔 Staff (${normalizedTeam.staff.length})`,
+      value: formatStaffField(normalizedTeam),
+      inline: false,
+    });
+  }
   const embed = new EmbedBuilder()
     .setColor(EMBED_COLOR)
     .setTitle(options?.title ?? DEFAULT_TITLE)
     .setTimestamp(detectedAt)
-    .addFields(
-      {
-        name: '👥 Équipe',
-        value: `**${normalizedTeam.team_name}**`,
-        inline: false,
-      },
-      {
-        name: `👥 Joueurs (${normalizedTeam.players.length})`,
-        value: formatPlayersField(normalizedTeam),
-        inline: false,
-      }
-    );
+    .addFields(fields);
 
   const footerParts: string[] = ['État: non créée (rôle/salon)'];
   if (options?.tournamentName?.trim()) {

@@ -28,6 +28,7 @@ export {
   extractTeamRefsFromTournament,
   extractTeamNameFromTeam,
   extractPlayerRefsFromTeam,
+  extractStaffRefsFromTeam,
   extractDiscordIdFromUser,
   extractUsernameFromUser,
   isValidTeamName,

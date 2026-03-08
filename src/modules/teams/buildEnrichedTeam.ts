@@ -11,6 +11,7 @@ import { getUserApiMaxConcurrent } from '../../config/index.js';
 import {
   extractTeamNameFromTeam,
   extractPlayerRefsFromTeam,
+  extractStaffRefsFromTeam,
   extractDiscordIdFromUser,
   extractUsernameFromUser,
   resolveTeamDisplayName,
@@ -89,16 +90,15 @@ export async function buildEnrichedTeam(
   }
 
   const playerRefs = extractPlayerRefsFromTeam(rawTeam);
+  const staffRefs = extractStaffRefsFromTeam(rawTeam);
 
   if (playerRefs.length === 0) {
     teamsLogger.warn('buildEnrichedTeam: aucune liste de joueurs', { teamId: idStr });
   }
 
   const maxConcurrent = getUserApiMaxConcurrent();
-  const normalizedPlayers = await runWithConcurrencyLimit(
-    playerRefs,
-    maxConcurrent,
-    async (ref) => {
+  const enrichRefs = async (refs: { id: string | number; pseudo?: string; isCaptain?: boolean }[]) =>
+    runWithConcurrencyLimit(refs, maxConcurrent, async (ref) => {
       let discordUserId: string | null = null;
       let discordUsername: string | null = null;
       try {
@@ -114,12 +114,16 @@ export async function buildEnrichedTeam(
         });
       }
       return buildNormalizedPlayer(ref, discordUserId, discordUsername);
-    }
-  );
+    });
+
+  const [normalizedPlayers, normalizedStaff] = await Promise.all([
+    enrichRefs(playerRefs),
+    enrichRefs(staffRefs),
+  ]);
 
   const appelsUserApi = getAndResetUserApiCallCount();
   const userStats = getAndResetUserApiStats();
-  const team = buildNormalizedTeam(idStr, teamName, normalizedPlayers);
+  const team = buildNormalizedTeam(idStr, teamName, normalizedPlayers, normalizedStaff);
   teamsLogger.info('buildEnrichedTeam: synthèse user', {
     teamId: idStr,
     fromMemory: userStats.fromMemory,

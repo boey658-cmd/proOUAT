@@ -53,13 +53,14 @@ export function buildNormalizedPlayer(
 }
 
 /**
- * Construit une équipe normalisée à partir de l'id, du nom et de la liste de joueurs.
+ * Construit une équipe normalisée à partir de l'id, du nom, des joueurs et optionnellement du staff.
  * Nom retenu : tout nom non vide (après trim) ; fallback Team-{teamApiId} uniquement si vide/null/undefined.
  */
 export function buildNormalizedTeam(
   teamApiId: string,
   teamName: string,
-  players: NormalizedPlayer[]
+  players: NormalizedPlayer[],
+  staff?: NormalizedPlayer[]
 ): NormalizedTeam {
   const id = String(teamApiId).trim() || '?';
   const trimmed = teamName != null && typeof teamName === 'string' ? teamName.trim() : '';
@@ -70,5 +71,6 @@ export function buildNormalizedTeam(
     team_name: safeName,
     normalized_team_name: normalizedTeamName,
     players: [...players],
+    staff: staff && staff.length > 0 ? [...staff] : undefined,
   };
 }
