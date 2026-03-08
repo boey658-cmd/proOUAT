@@ -5,7 +5,7 @@
 
 import type { ButtonInteraction } from 'discord.js';
 import { decodeCreateTeamCustomId } from '../buttons/createTeamButtonCustomId.js';
-import { getAllowedStaffRoleIds } from '../../../config/index.js';
+import { getAllowedStaffRoleIds, getDiscordGuildId1, getDiscordGuildId2 } from '../../../config/index.js';
 import * as teamsRepo from '../../../db/repositories/teams.js';
 import * as teamDiscordStateRepo from '../../../db/repositories/teamDiscordState.js';
 import { checkDiscordLimits } from '../resources/checkDiscordLimits.js';
@@ -80,6 +80,22 @@ export async function handleCreateTeamButton(
       ephemeral: true,
     }).catch(() => {});
     return { success: false, message: 'guild manquant' };
+  }
+
+  const guildId1 = getDiscordGuildId1();
+  const guildId2 = getDiscordGuildId2();
+  if (guild.id !== guildId1 && guild.id !== guildId2) {
+    discordLogger.warn('handleCreateTeamButton: guild non autorisé', {
+      guildId: guild.id,
+      teamApiId,
+      userId,
+    });
+    await interaction.reply({
+      content:
+        'Cette action doit être effectuée sur le serveur principal (1) ou secondaire (2). Vérifiez DISCORD_GUILD_ID_1 et DISCORD_GUILD_ID_2.',
+      ephemeral: true,
+    }).catch(() => {});
+    return { success: false, message: 'guild non autorisé' };
   }
 
   if (!userHasStaffRole(interaction)) {

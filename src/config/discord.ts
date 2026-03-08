@@ -47,3 +47,15 @@ export function getDiscordGuildId2(): string | null {
   if (!id || typeof id !== 'string' || id.trim() === '') return null;
   return id.trim();
 }
+
+/**
+ * Indique si un guildId est autorisé pour les canaux sensibles (audit, notifications staff).
+ * Si les deux guilds principaux sont configurés : seul guildId1 ou guildId2 est accepté.
+ * Si aucun n'est configuré : accepte tout (évite de bloquer les déploiements sans commandes).
+ */
+export function isGuildIdAllowedForChannels(guildId: string): boolean {
+  const g1 = getDiscordGuildId1();
+  const g2 = getDiscordGuildId2();
+  if (!g1 && !g2) return true;
+  return g1 === guildId || g2 === guildId;
+}

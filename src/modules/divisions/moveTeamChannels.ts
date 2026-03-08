@@ -78,6 +78,27 @@ export async function moveTeamChannelToCategory(
     return { success: false, error: 'Salon non déplaçable' };
   }
 
+  let category: GuildBasedChannel | null;
+  try {
+    category = await guild.channels.fetch(categoryId);
+  } catch {
+    category = null;
+  }
+  if (!category || (category as { type: number }).type !== ChannelType.GuildCategory) {
+    divisionsLogger.error('moveTeamChannelToCategory: catégorie introuvable ou invalide', {
+      ...baseLog,
+    });
+    return { success: false, error: 'Catégorie introuvable ou invalide' };
+  }
+  const categoryGuildId = 'guildId' in category ? (category as { guildId: string }).guildId : guild.id;
+  if (categoryGuildId !== guild.id) {
+    divisionsLogger.error('moveTeamChannelToCategory: catégorie sur un autre serveur', {
+      ...baseLog,
+      categoryGuildId,
+    });
+    return { success: false, error: 'Catégorie sur un autre serveur' };
+  }
+
   try {
     await (channel as { setParent: (id: string, opts?: { lockPermissions?: boolean; reason?: string }) => Promise<unknown> }).setParent(categoryId, {
       lockPermissions: false,

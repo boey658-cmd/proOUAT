@@ -5,6 +5,7 @@
 import type { Client, TextChannel } from 'discord.js';
 import type { ReactivatedTeamInfo } from '../../teams/syncTeamsWithDatabase.js';
 import { buildTeamReactivatedEmbed } from '../embeds/teamReactivatedEmbed.js';
+import { isGuildIdAllowedForChannels } from '../../../config/index.js';
 import { discordLogger } from '../logger.js';
 
 export interface SendReactivatedTeamMessageResult {
@@ -37,6 +38,11 @@ export async function sendReactivatedTeamMessage(
         channelId,
       });
       return { success: false, error: 'Salon introuvable ou non texte' };
+    }
+    const guildId = (channel as TextChannel).guildId ?? null;
+    if (guildId && !isGuildIdAllowedForChannels(guildId)) {
+      discordLogger.warn('sendReactivatedTeamMessage: salon hors serveurs autorisés', { channelId, guildId });
+      return { success: false, error: 'Salon hors serveurs autorisés' };
     }
 
     const embed = buildTeamReactivatedEmbed(info);

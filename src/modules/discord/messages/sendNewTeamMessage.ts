@@ -9,6 +9,7 @@ import type { SendNewTeamMessageResult } from '../types.js';
 import { buildNewTeamEmbed } from '../embeds/newTeamEmbed.js';
 import { buildCreateTeamButton } from '../buttons/buildCreateTeamButton.js';
 import { discordLogger } from '../logger.js';
+import { isGuildIdAllowedForChannels } from '../../../config/index.js';
 import * as teamsRepo from '../../../db/repositories/teams.js';
 import * as teamDiscordStateRepo from '../../../db/repositories/teamDiscordState.js';
 
@@ -70,6 +71,13 @@ export async function sendNewTeamMessage(
 
     const textChannel = channel as TextChannel;
     const guildId = textChannel.guildId ?? null;
+    if (guildId && !isGuildIdAllowedForChannels(guildId)) {
+      discordLogger.warn('sendNewTeamMessage: salon hors serveurs autorisés (DISCORD_GUILD_ID_1/2)', {
+        channelId,
+        guildId,
+      });
+      return { success: false, error: 'Salon hors serveurs autorisés' };
+    }
     let teamForEmbed = normalizedTeam;
     if (guildId) {
       try {

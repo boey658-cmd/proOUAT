@@ -4,7 +4,7 @@
  */
 
 import type { Client, TextChannel } from 'discord.js';
-import { getAuditLogChannelId } from '../config/index.js';
+import { getAuditLogChannelId, isGuildIdAllowedForChannels } from '../config/index.js';
 
 const PREFIX = '[audit]';
 
@@ -40,6 +40,11 @@ export async function sendAuditLog(
     const channel = await client.channels.fetch(channelId);
     if (!channel || !channel.isTextBased() || !('send' in channel)) {
       logAuditError('sendAuditLog: salon introuvable ou non texte', channelId);
+      return false;
+    }
+    const channelGuildId = (channel as TextChannel).guildId ?? null;
+    if (channelGuildId && !isGuildIdAllowedForChannels(channelGuildId)) {
+      logAuditError('sendAuditLog: salon audit hors serveurs autorisés (DISCORD_GUILD_ID_1/2)', channelGuildId);
       return false;
     }
     const content = message.trim();
@@ -84,6 +89,11 @@ export async function sendAuditLogEmbed(
     const channel = await client.channels.fetch(channelId);
     if (!channel || !channel.isTextBased() || !('send' in channel)) {
       logAuditError('sendAuditLogEmbed: salon introuvable ou non texte', channelId);
+      return false;
+    }
+    const channelGuildId = (channel as TextChannel).guildId ?? null;
+    if (channelGuildId && !isGuildIdAllowedForChannels(channelGuildId)) {
+      logAuditError('sendAuditLogEmbed: salon audit hors serveurs autorisés (DISCORD_GUILD_ID_1/2)', channelGuildId);
       return false;
     }
 

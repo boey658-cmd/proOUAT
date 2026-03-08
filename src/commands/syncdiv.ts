@@ -3,7 +3,7 @@
  */
 
 import type { ChatInputCommandInteraction } from 'discord.js';
-import { getAllowedStaffRoleIds } from '../config/index.js';
+import { getAllowedStaffRoleIds, getDiscordGuildId1, getDiscordGuildId2 } from '../config/index.js';
 import { syncDivisionsFromCalendar } from '../modules/divisions/syncDivisionsFromCalendar.js';
 import { sendAuditLog, buildAuditMessage, AUDIT_PREFIX } from '../audit/index.js';
 import { notifyJobSuccess, notifyJobFailure } from '../monitoring/index.js';
@@ -66,6 +66,23 @@ export async function handleSyncdivCommand(
   }
 
   await interaction.deferReply({ ephemeral: true });
+
+  const guild = interaction.guild;
+  if (!guild) {
+    await interaction.editReply({
+      content: 'Cette commande doit être exécutée sur un serveur.',
+    }).catch(() => {});
+    return;
+  }
+  const guildId1 = getDiscordGuildId1();
+  const guildId2 = getDiscordGuildId2();
+  if (guild.id !== guildId1 && guild.id !== guildId2) {
+    await interaction.editReply({
+      content:
+        'Cette commande doit être exécutée sur le serveur principal (1) ou secondaire (2). Vérifiez DISCORD_GUILD_ID_1 et DISCORD_GUILD_ID_2.',
+    }).catch(() => {});
+    return;
+  }
 
   const client = interaction.client;
   await sendAuditLog(

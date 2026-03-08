@@ -5,6 +5,7 @@
 import type { Client, TextChannel } from 'discord.js';
 import type { RemovedTeamInfo } from '../../teams/syncTeamsWithDatabase.js';
 import { buildTeamRemovedEmbed } from '../embeds/teamRemovedEmbed.js';
+import { isGuildIdAllowedForChannels } from '../../../config/index.js';
 import { discordLogger } from '../logger.js';
 
 export interface SendRemovedTeamMessageResult {
@@ -37,6 +38,11 @@ export async function sendRemovedTeamMessage(
         channelId,
       });
       return { success: false, error: 'Salon introuvable ou non texte' };
+    }
+    const guildId = (channel as TextChannel).guildId ?? null;
+    if (guildId && !isGuildIdAllowedForChannels(guildId)) {
+      discordLogger.warn('sendRemovedTeamMessage: salon hors serveurs autorisés', { channelId, guildId });
+      return { success: false, error: 'Salon hors serveurs autorisés' };
     }
 
     const embed = buildTeamRemovedEmbed(info);
