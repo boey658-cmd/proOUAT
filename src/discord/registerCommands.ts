@@ -28,6 +28,30 @@ export async function registerCommands(client: Client<true>): Promise<void> {
           .setMinValue(1)
       )
       .toJSON(),
+    new SlashCommandBuilder()
+      .setName('stats')
+      .setDescription('Résumé lecture seule de la base (équipes, joueurs, divisions).')
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('db')
+      .setDescription('Consultation lecture seule de la base.')
+      .addSubcommand((sc) =>
+        sc
+          .setName('anomalies')
+          .setDescription('Liste les anomalies détectées (sans correction).')
+      )
+      .addSubcommand((sc) =>
+        sc
+          .setName('team')
+          .setDescription('Affiche le détail d’une équipe par nom.')
+          .addStringOption((opt) =>
+            opt
+              .setName('name')
+              .setDescription('Nom ou partie du nom de l’équipe')
+              .setRequired(true)
+          )
+      )
+      .toJSON(),
   ];
 
   try {

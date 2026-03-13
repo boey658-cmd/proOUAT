@@ -8,6 +8,11 @@ import { isCreateTeamCustomId } from '../../modules/discord/buttons/createTeamBu
 import { handleCreateTeamButton } from '../../modules/discord/interactions/handleCreateTeamButton.js';
 import { handleSyncdivCommand } from '../../commands/syncdiv.js';
 import { handleCreationchaneldivCommand } from '../../commands/creationchaneldiv.js';
+import {
+  handleStatsCommand,
+  handleDbAnomaliesCommand,
+  handleDbTeamCommand,
+} from '../../modules/dbRead/index.js';
 
 export function registerInteractionCreateEvent(client: Client): void {
   client.on('interactionCreate', async (interaction) => {
@@ -19,10 +24,28 @@ export function registerInteractionCreateEvent(client: Client): void {
         return;
       }
       if (interaction.isChatInputCommand()) {
+        if (
+          interaction.commandName === 'stats' ||
+          interaction.commandName === 'db'
+        ) {
+          if (interaction.user.id !== '753143755388879051') {
+            await interaction.reply({
+              content: 'Commande non autorisée.',
+              ephemeral: true,
+            }).catch(() => {});
+            return;
+          }
+        }
         if (interaction.commandName === 'syncdiv') {
           await handleSyncdivCommand(interaction);
         } else if (interaction.commandName === 'creationchaneldiv') {
           await handleCreationchaneldivCommand(interaction);
+        } else if (interaction.commandName === 'stats') {
+          await handleStatsCommand(interaction);
+        } else if (interaction.commandName === 'db') {
+          const sub = interaction.options.getSubcommand();
+          if (sub === 'anomalies') await handleDbAnomaliesCommand(interaction);
+          else if (sub === 'team') await handleDbTeamCommand(interaction);
         }
       }
     } catch (err) {
