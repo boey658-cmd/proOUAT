@@ -6,7 +6,9 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
-    "migrate": "tsx -e \"import { openDatabase } from './src/db/database.js'; import { runMigrations } from './src/db/migrate.js'; openDatabase(); const n = runMigrations(); console.log('Migrations applied:', n); process.exit(0);\""
+    "migrate": "tsx -e \"import { openDatabase } from './src/db/database.js'; import { runMigrations } from './src/db/migrate.js'; openDatabase(); const n = runMigrations(); console.log('Migrations applied:', n); process.exit(0);\"",
+    "cleanup-archived:preview": "tsx src/scripts/cleanupArchivedTeams.ts --preview",
+    "cleanup-archived:cleanup": "tsx src/scripts/cleanupArchivedTeams.ts --cleanup"
   },
   "dependencies": {
     "axios": "^1.7.7",

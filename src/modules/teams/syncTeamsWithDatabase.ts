@@ -431,8 +431,9 @@ function deleteTeamAndAllLinksFromDb(teamId: number): void {
  * Oubli complet de l'équipe en base. Transaction unique SQLite : toute la purge est atomique ;
  * aucun DELETE n'est exécuté hors transaction. Aucune action sur Discord.
  * Après cet appel, une réinscription sera traitée comme nouvelle équipe.
+ * Exporté pour le script one-shot de nettoyage des équipes archivées (cleanupArchivedTeams).
  */
-function forgetTeamAndRemoveFromDb(team: TeamRow): void {
+export function forgetTeamAndRemoveFromDb(team: TeamRow): void {
   const db = getDatabase();
   db.transaction(() => {
     deleteTeamAndAllLinksFromDb(team.id);
