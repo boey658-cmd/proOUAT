@@ -207,8 +207,10 @@ function updateTeamAndPlayers(
 ): { hadChanges: boolean; diff: TeamUpdateDiff | null } {
   const ts = now();
   const allMembers = playersRepo.findPlayersByTeamId(existingTeamId);
-  const existingPlayers = allMembers.filter((r) => (r.is_staff ?? 0) === 0);
-  const existingStaff = allMembers.filter((r) => (r.is_staff ?? 0) === 1);
+  const existingPlayersAll = allMembers.filter((r) => (r.is_staff ?? 0) === 0);
+  const existingStaffAll = allMembers.filter((r) => (r.is_staff ?? 0) === 1);
+  const existingActivePlayers = existingPlayersAll.filter((r) => r.status !== 'left_team');
+  const existingActiveStaff = existingStaffAll.filter((r) => r.status !== 'left_team');
   const currentKeys = new Set(normalized.players.map(playerKey));
   const currentStaffKeys = new Set(
     (normalized.staff ?? []).map((s) => `staff-${s.player_api_id ?? ''}`)
@@ -229,12 +231,12 @@ function updateTeamAndPlayers(
   const toUpdate: { row: PlayerRow; normalized: NormalizedPlayer }[] = [];
 
   for (const p of normalized.players) {
-    const match = findMatchingExistingPlayer(existingPlayers, p);
+    const match = findMatchingExistingPlayer(existingActivePlayers, p);
     if (match) toUpdate.push({ row: match, normalized: p });
     else newPlayers.push(p);
   }
   const matchedPlayerRowIds = new Set(toUpdate.map((t) => t.row.id));
-  for (const row of existingPlayers) {
+  for (const row of existingActivePlayers) {
     if (matchedPlayerRowIds.has(row.id)) continue;
     const key = row.player_api_id ? `api:${row.player_api_id}` : `pseudo:${row.normalized_lol_pseudo}`;
     if (!currentKeys.has(key)) leftPlayerRows.push(row);
@@ -258,9 +260,9 @@ function updateTeamAndPlayers(
   }
 
   const newStaffList = (normalized.staff ?? []).filter(
-    (s) => !existingStaff.some((e) => e.player_api_id === `staff-${s.player_api_id ?? ''}`)
+    (s) => !existingActiveStaff.some((e) => e.player_api_id === `staff-${s.player_api_id ?? ''}`)
   );
-  const leftStaffRows = existingStaff.filter((r) => !currentStaffKeys.has(r.player_api_id ?? ''));
+  const leftStaffRows = existingActiveStaff.filter((r) => !currentStaffKeys.has(r.player_api_id ?? ''));
 
   const hasContentChange =
     nameChanged ||
@@ -300,6 +302,14 @@ function updateTeamAndPlayers(
     teamsLogger.info('syncTeamsWithDatabase: [DEBUG] détection update — avant persistance', {
       team_id: existingTeamId,
       team_api_id: normalized.team_api_id,
+      comparaison: {
+        joueurs_actifs_comparés: existingActivePlayers.length,
+        staff_actifs_comparés: existingActiveStaff.length,
+        joueurs_left_team_ignorés: existingPlayersAll.length - existingActivePlayers.length,
+        staff_left_team_ignorés: existingStaffAll.length - existingActiveStaff.length,
+        leftPlayersCount_final: leftPlayerRows.length,
+        leftStaffCount_final: leftStaffRows.length,
+      },
       snapshot_db_avant: buildDbSnapshotForDebug(existingRow, allMembers),
       snapshot_normalized: buildNormalizedSnapshotForDebug(normalized),
       differences: {
