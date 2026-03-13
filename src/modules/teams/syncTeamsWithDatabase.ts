@@ -86,6 +86,45 @@ function now(): string {
   return new Date().toISOString();
 }
 
+/** Snapshot minimal pour logs debug (équipe + joueurs). */
+function buildDbSnapshotForDebug(
+  team: ReturnType<typeof teamsRepo.findTeamById>,
+  players: ReturnType<typeof playersRepo.findPlayersByTeamId>
+): Record<string, unknown> {
+  if (!team) return { team: null, players: [] };
+  return {
+    team_name: team.team_name,
+    normalized_team_name: team.normalized_team_name,
+    status: team.status,
+    last_synced_at: team.last_synced_at,
+    players: (players ?? []).map((p) => ({
+      id: p.id,
+      player_api_id: p.player_api_id,
+      lol_pseudo: p.lol_pseudo,
+      normalized_lol_pseudo: p.normalized_lol_pseudo,
+      discord_user_id: p.discord_user_id ?? null,
+      status: p.status,
+      is_staff: p.is_staff ?? 0,
+    })),
+  };
+}
+
+/** Snapshot minimal du payload normalisé pour logs debug. */
+function buildNormalizedSnapshotForDebug(normalized: NormalizedTeam): Record<string, unknown> {
+  return {
+    team_name: normalized.team_name,
+    normalized_team_name: normalized.normalized_team_name,
+    players: (normalized.players ?? []).map((p) => ({
+      player_api_id: p.player_api_id ?? null,
+      lol_pseudo: p.lol_pseudo,
+      normalized_lol_pseudo: p.normalized_lol_pseudo,
+      discord_user_id: p.discord_user_id ?? null,
+      is_captain: p.is_captain,
+    })),
+    staff_count: (normalized.staff ?? []).length,
+  };
+}
+
 function playerStatus(p: NormalizedPlayer): 'active' | 'missing_discord_id' {
   return p.discord_user_id && p.discord_user_id.trim() !== '' ? 'active' : 'missing_discord_id';
 }
@@ -194,7 +233,9 @@ function updateTeamAndPlayers(
     if (match) toUpdate.push({ row: match, normalized: p });
     else newPlayers.push(p);
   }
+  const matchedPlayerRowIds = new Set(toUpdate.map((t) => t.row.id));
   for (const row of existingPlayers) {
+    if (matchedPlayerRowIds.has(row.id)) continue;
     const key = row.player_api_id ? `api:${row.player_api_id}` : `pseudo:${row.normalized_lol_pseudo}`;
     if (!currentKeys.has(key)) leftPlayerRows.push(row);
   }
@@ -255,6 +296,23 @@ function updateTeamAndPlayers(
         }
       : null;
 
+  if (hasContentChange || nameChanged) {
+    teamsLogger.info('syncTeamsWithDatabase: [DEBUG] détection update — avant persistance', {
+      team_id: existingTeamId,
+      team_api_id: normalized.team_api_id,
+      snapshot_db_avant: buildDbSnapshotForDebug(existingRow, allMembers),
+      snapshot_normalized: buildNormalizedSnapshotForDebug(normalized),
+      differences: {
+        nameChanged,
+        newPlayersCount: newPlayers.length,
+        leftPlayersCount: leftPlayerRows.length,
+        playerUpdatesCount: playerUpdates.length,
+        newStaffCount: newStaffList.length,
+        leftStaffCount: leftStaffRows.length,
+      },
+    });
+  }
+
   if (nameChanged) {
     teamsRepo.updateTeam(existingTeamId, {
       team_name: normalized.team_name,
@@ -311,6 +369,16 @@ function updateTeamAndPlayers(
       is_staff: 1,
       created_at: ts,
       updated_at: ts,
+    });
+  }
+
+  if (hasContentChange || nameChanged) {
+    const rereadTeam = teamsRepo.findTeamById(existingTeamId);
+    const rereadPlayers = playersRepo.findPlayersByTeamId(existingTeamId);
+    teamsLogger.info('syncTeamsWithDatabase: [DEBUG] équipe mise à jour — relu en base après update', {
+      team_id: existingTeamId,
+      team_api_id: normalized.team_api_id,
+      snapshot_db_apres_update: buildDbSnapshotForDebug(rereadTeam, rereadPlayers),
     });
   }
 
