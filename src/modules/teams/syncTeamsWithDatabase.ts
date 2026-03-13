@@ -8,7 +8,7 @@ import { getDatabase } from '../../db/database.js';
 import * as teamsRepo from '../../db/repositories/teams.js';
 import * as playersRepo from '../../db/repositories/players.js';
 import type { NormalizedTeam, NormalizedPlayer } from './types.js';
-import type { PlayerRow } from '../../db/types.js';
+import type { PlayerRow, TeamRow } from '../../db/types.js';
 import { teamsLogger } from './logger.js';
 
 /** Détail d'un joueur ajouté ou retiré (pour embed staff). */
@@ -396,6 +396,54 @@ function updateTeamAndPlayers(
 }
 
 /**
+ * Purge DB complète pour une équipe (joueurs, ressources Discord, état, divisions, etc., puis ligne team).
+ *
+ * --- Table players (analyse validée) ---
+ * - Rôle : table d'appartenance joueur ↔ équipe (une ligne = un joueur dans une équipe). Utilisée par
+ *   syncTeamsWithDatabase, syncMemberTeamRole (findPlayerByDiscordUserId), syncExistingTeamMembersRole,
+ *   dbRead (stats/détail équipe). Pas une table "utilisateurs" centrale.
+ * - Dépendances : aucune table ne référence players (migrations : pas de REFERENCES players(id)).
+ *   Seule players référence teams(team_id). Aucune perte de références en supprimant les lignes de cette équipe.
+ * - Historique : on perd l'appartenance passée à cette équipe ; le métier exige "réinscription = nouvelle équipe",
+ *   donc cet historique n'est pas requis. DELETE des players de cette équipe est donc sûr.
+ *
+ * --- Transaction (garantie atomique) ---
+ * Cette fonction ne doit être appelée QUE depuis l'intérieur d'une transaction SQLite déjà ouverte :
+ * - soit forgetTeamAndRemoveFromDb (qui ouvre une transaction dédiée),
+ * - soit le loop principal de sync (branche archived, dans la même transaction que insertTeamAndPlayers).
+ * Toute la purge (players, discord_resources, team_discord_state, division_assignments, pending_actions,
+ * staff_messages, team_snapshots, teams) s'exécute dans UNE SEULE transaction ; aucun DELETE ne part partiellement.
+ * Aucune action sur Discord.
+ */
+function deleteTeamAndAllLinksFromDb(teamId: number): void {
+  const db = getDatabase();
+  playersRepo.deletePlayersByTeamId(teamId);
+  db.prepare('DELETE FROM discord_resources WHERE team_id = ?').run(teamId);
+  db.prepare('DELETE FROM team_discord_state WHERE team_id = ?').run(teamId);
+  db.prepare('DELETE FROM division_assignments WHERE team_id = ?').run(teamId);
+  db.prepare('DELETE FROM pending_actions WHERE team_id = ?').run(teamId);
+  db.prepare('DELETE FROM staff_messages WHERE team_id = ?').run(teamId);
+  db.prepare('DELETE FROM team_snapshots WHERE team_id = ?').run(teamId);
+  db.prepare('DELETE FROM teams WHERE id = ?').run(teamId);
+}
+
+/**
+ * Oubli complet de l'équipe en base. Transaction unique SQLite : toute la purge est atomique ;
+ * aucun DELETE n'est exécuté hors transaction. Aucune action sur Discord.
+ * Après cet appel, une réinscription sera traitée comme nouvelle équipe.
+ */
+function forgetTeamAndRemoveFromDb(team: TeamRow): void {
+  const db = getDatabase();
+  db.transaction(() => {
+    deleteTeamAndAllLinksFromDb(team.id);
+  })();
+  teamsLogger.debug('syncTeamsWithDatabase: équipe oubliée en base (suppression DB uniquement)', {
+    team_id: team.id,
+    team_api_id: team.team_api_id,
+  });
+}
+
+/**
  * Synchronise les équipes normalisées avec la base de données.
  * - Nouvelle équipe → insert team + players
  * - Équipe existante → compare joueurs (nouveaux, partis, nom équipe), met à jour en conséquence
@@ -460,25 +508,14 @@ export function syncTeamsWithDatabase(
             player_count: normalized.players.length,
           });
         } else if (existing.status === 'archived') {
-          updateTeamAndPlayers(existing.id, normalized);
-          teamsRepo.updateTeam(existing.id, {
-            status: 'active',
-            team_name: normalized.team_name,
-            normalized_team_name: normalized.normalized_team_name,
-            last_seen_at: ts,
-            last_synced_at: ts,
-          });
-          result.reactivated++;
-          result.reactivatedTeams.push({
+          // Purge atomique (même transaction que insertTeamAndPlayers ci-dessous)
+          deleteTeamAndAllLinksFromDb(existing.id);
+          insertTeamAndPlayers(normalized);
+          result.created++;
+          result.createdTeams.push(normalized);
+          createdInThisRun.add(teamApiId);
+          teamsLogger.debug('syncTeamsWithDatabase: équipe réinscrite traitée comme nouvelle (ancienne ligne oubliée)', {
             team_api_id: teamApiId,
-            team_name: normalized.team_name,
-            team_id: existing.id,
-            detectedAt: ts,
-            playerCount: normalized.players.length,
-          });
-          teamsLogger.debug('syncTeamsWithDatabase: équipe réinscrite', {
-            team_api_id: teamApiId,
-            team_id: existing.id,
             player_count: normalized.players.length,
           });
         } else {
@@ -537,7 +574,7 @@ export function syncTeamsWithDatabase(
           team_id: team.id,
           detectedAt: tsRemoved,
         });
-        teamsRepo.updateTeam(team.id, { status: 'archived' });
+        forgetTeamAndRemoveFromDb(team);
       }
     }
     if (result.removedTeams.length > 0) {

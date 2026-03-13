@@ -7,6 +7,7 @@
 import type { GuildMember } from 'discord.js';
 import * as playersRepo from '../../../db/repositories/players.js';
 import * as teamDiscordStateRepo from '../../../db/repositories/teamDiscordState.js';
+import * as teamsRepo from '../../../db/repositories/teams.js';
 import { discordLogger } from '../logger.js';
 
 export interface SyncMemberTeamRoleResult {
@@ -37,6 +38,11 @@ export async function syncMemberTeamRole(member: GuildMember): Promise<SyncMembe
   const player = playersRepo.findPlayerByDiscordUserId(discordUserId);
   if (!player) {
     return { success: false, reason: 'joueur non trouvé en base' };
+  }
+
+  const team = teamsRepo.findTeamById(player.team_id);
+  if (!team || team.status === 'archived') {
+    return { success: false, reason: 'équipe archivée ou introuvable' };
   }
 
   const state = teamDiscordStateRepo.findTeamDiscordStateByTeamId(player.team_id);

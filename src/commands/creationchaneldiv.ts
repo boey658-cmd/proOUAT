@@ -87,6 +87,7 @@ export async function handleCreationchaneldivCommand(
   let teams = teamsRepo.findTeamsByDivision(divisionNumber);
   teams = teams.filter(
     (t) =>
+      t.status !== 'archived' &&
       t.division_number != null &&
       t.division_group != null &&
       String(t.division_group).trim() !== ''
