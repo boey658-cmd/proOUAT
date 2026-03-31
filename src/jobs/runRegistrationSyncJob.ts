@@ -126,29 +126,7 @@ export async function runRegistrationSyncJob(
       scanErrors: scanResult.errors.length,
     });
 
-    const totalRefsAttempted = scanResult.teams.length + scanResult.errors.length;
-    const scanSuccessRatio =
-      totalRefsAttempted > 0 ? scanResult.teams.length / totalRefsAttempted : 1;
-    const isScanDegraded = totalRefsAttempted > 0 && scanSuccessRatio < 0.8;
-    if (isScanDegraded) {
-      logger.warn('Scan dégradé : suppressions désactivées pour ce run', {
-        teamsOk: scanResult.teams.length,
-        errors: scanResult.errors.length,
-        totalRefs: totalRefsAttempted,
-      });
-      await sendAuditLog(
-        client,
-        buildAuditMessage(
-          'warn',
-          AUDIT_PREFIX.REGISTRATION_SYNC,
-          `Scan dégradé détecté — suppressions désactivées pour ce run (${scanResult.errors.length} erreur(s) scan).`
-        )
-      );
-    }
-
-    const syncResult = syncTeamsWithDatabase(scanResult.teams, {
-      skipRemovals: isScanDegraded,
-    });
+    const syncResult = syncTeamsWithDatabase(scanResult.teams);
     syncResult.errors.forEach(
       (e) => errors.push(`[sync] ${e.team_api_id} - ${e.message}`)
     );

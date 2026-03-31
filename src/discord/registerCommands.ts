@@ -18,6 +18,18 @@ export async function registerCommands(client: Client<true>): Promise<void> {
       .setDescription('Synchronise les divisions et groupes depuis le calendrier du tournoi.')
       .toJSON(),
     new SlashCommandBuilder()
+      .setName('desinscription')
+      .setDescription(
+        'Retire une équipe de la base (oubli SQLite). À utiliser si l’équipe ne participe plus ; pas d’action sur Discord.'
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName('team_api_id')
+          .setDescription('Identifiant API de l’équipe (team_api_id en base)')
+          .setRequired(true)
+      )
+      .toJSON(),
+    new SlashCommandBuilder()
       .setName('creationchaneldiv')
       .setDescription('Organise les équipes de la division (catégories, renommage ou création rôle/salon).')
       .addIntegerOption((opt) =>

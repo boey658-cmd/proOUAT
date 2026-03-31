@@ -8,6 +8,7 @@ import { isCreateTeamCustomId } from '../../modules/discord/buttons/createTeamBu
 import { handleCreateTeamButton } from '../../modules/discord/interactions/handleCreateTeamButton.js';
 import { handleSyncdivCommand } from '../../commands/syncdiv.js';
 import { handleCreationchaneldivCommand } from '../../commands/creationchaneldiv.js';
+import { handleDesinscriptionCommand } from '../../commands/desinscription.js';
 import {
   handleStatsCommand,
   handleDbAnomaliesCommand,
@@ -38,6 +39,8 @@ export function registerInteractionCreateEvent(client: Client): void {
         }
         if (interaction.commandName === 'syncdiv') {
           await handleSyncdivCommand(interaction);
+        } else if (interaction.commandName === 'desinscription') {
+          await handleDesinscriptionCommand(interaction);
         } else if (interaction.commandName === 'creationchaneldiv') {
           await handleCreationchaneldivCommand(interaction);
         } else if (interaction.commandName === 'stats') {

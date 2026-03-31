@@ -34,7 +34,7 @@ export interface TeamUpdateDiff {
   discordIdChanges: TeamUpdateDiscordIdChange[];
 }
 
-/** Équipe absente du scan (désinscrite / disparue du tournoi). */
+/** Métadonnées historiques ; le scan ne remplit plus removedTeams (retrait = /desinscription). */
 export interface RemovedTeamInfo {
   team_api_id: string;
   team_name: string;
@@ -62,7 +62,7 @@ export interface SyncResult {
   updatedTeams: TeamUpdateDiff[];
   /** Nombre d'équipes sans changement (last_seen_at seulement). */
   unchanged: number;
-  /** Équipes en base mais absentes du scan (désinscrites). */
+  /** Toujours vide : le retrait en base ne se fait plus via le scan (commande /desinscription). */
   removedTeams: RemovedTeamInfo[];
   /** Nombre d'équipes réinscrites (étaient archived, réapparaissent dans le scan). */
   reactivated: number;
@@ -78,7 +78,7 @@ export interface SyncError {
 }
 
 export interface SyncOptions {
-  /** Si true, ne pas calculer ni appliquer les suppressions (removed) pour ce run (ex. scan dégradé). */
+  /** Réservé extension ; le scan ne déclenche plus de suppressions en base. */
   skipRemovals?: boolean;
 }
 
@@ -410,7 +410,7 @@ function updateTeamAndPlayers(
  * --- Transaction (garantie atomique) ---
  * Cette fonction ne doit être appelée QUE depuis l'intérieur d'une transaction SQLite déjà ouverte :
  * - soit forgetTeamAndRemoveFromDb (qui ouvre une transaction dédiée),
- * - soit le loop principal de sync (branche archived, dans la même transaction que insertTeamAndPlayers).
+ * - soit une transaction future qui regroupe purge + autre logique (ex. hors sync).
  * Toute la purge (players, discord_resources, team_discord_state, division_assignments, pending_actions,
  * staff_messages, team_snapshots, teams) s'exécute dans UNE SEULE transaction ; aucun DELETE ne part partiellement.
  * Aucune action sur Discord.
@@ -448,13 +448,12 @@ export function forgetTeamAndRemoveFromDb(team: TeamRow): void {
  * Synchronise les équipes normalisées avec la base de données.
  * - Nouvelle équipe → insert team + players
  * - Équipe existante → compare joueurs (nouveaux, partis, nom équipe), met à jour en conséquence
- * - Équipes en base mais absentes du scan → remontées dans removedTeams (désinscrites)
+ * - Absence du scan API : aucune action (pas de purge, pas de removedTeams).
  * Chaque équipe est traitée dans une transaction.
- * @param options.skipRemovals - Si true (ex. scan dégradé), aucune équipe ne sera marquée removed ni archivée.
  */
 export function syncTeamsWithDatabase(
   normalizedTeams: NormalizedTeam[],
-  options?: SyncOptions
+  _options?: SyncOptions
 ): SyncResult {
   const result: SyncResult = {
     created: 0,
@@ -481,9 +480,6 @@ export function syncTeamsWithDatabase(
   }
 
   const db = getDatabase();
-  const scanTeamApiIds = new Set(normalizedTeams.map((t) => (t.team_api_id ?? '').trim()).filter(Boolean));
-  /** Nombre d'équipes actives en base avant ce sync (pour protection scan incomplet). */
-  const activeCountBeforeSync = teamsRepo.findTeamsWithStatusIn(['new', 'active', 'changed']).length;
   /** Équipes créées dans ce run : ne doivent jamais être comptées comme "updated" (premier scan / doublons). */
   const createdInThisRun = new Set<string>();
   teamsLogger.info('syncTeamsWithDatabase: démarrage', { count: normalizedTeams.length });
@@ -509,16 +505,25 @@ export function syncTeamsWithDatabase(
             player_count: normalized.players.length,
           });
         } else if (existing.status === 'archived') {
-          // Purge atomique (même transaction que insertTeamAndPlayers ci-dessous)
-          deleteTeamAndAllLinksFromDb(existing.id);
-          insertTeamAndPlayers(normalized);
-          result.created++;
-          result.createdTeams.push(normalized);
-          createdInThisRun.add(teamApiId);
-          teamsLogger.debug('syncTeamsWithDatabase: équipe réinscrite traitée comme nouvelle (ancienne ligne oubliée)', {
-            team_api_id: teamApiId,
-            player_count: normalized.players.length,
+          // Réapparition API : équipe connue, pas de purge (retrait = /desinscription uniquement)
+          teamsRepo.updateTeam(existing.id, {
+            status: 'active',
+            last_seen_at: ts,
+            last_synced_at: ts,
           });
+          const { hadChanges, diff } = updateTeamAndPlayers(existing.id, normalized);
+          if (hadChanges) {
+            if (!createdInThisRun.has(teamApiId)) {
+              result.updated++;
+              if (diff) result.updatedTeams.push(diff);
+              teamsLogger.debug('syncTeamsWithDatabase: équipe archivée réactivée depuis le scan (mise à jour)', {
+                team_api_id: teamApiId,
+                team_id: existing.id,
+              });
+            }
+          } else {
+            result.unchanged++;
+          }
         } else {
           const { hadChanges, diff } = updateTeamAndPlayers(existing.id, normalized);
           if (hadChanges) {
@@ -541,47 +546,6 @@ export function syncTeamsWithDatabase(
       teamsLogger.error('syncTeamsWithDatabase: erreur sur équipe', {
         team_api_id: teamApiId,
         message,
-      });
-    }
-  }
-
-  const scannedCount = normalizedTeams.length;
-  const removalThreshold = 0.8;
-  const skipRemovalsByOption = options?.skipRemovals === true;
-  const skipRemovalsByProtection =
-    activeCountBeforeSync > 0 && scannedCount < activeCountBeforeSync * removalThreshold;
-  const runRemovals = !skipRemovalsByOption && !skipRemovalsByProtection;
-
-  if (skipRemovalsByOption) {
-    teamsLogger.warn('syncTeamsWithDatabase: suppressions désactivées (scan dégradé)', {
-      scannedCount,
-    });
-  } else if (skipRemovalsByProtection) {
-    teamsLogger.warn('Protection de synchronisation activée : nombre d\'équipes scannées trop faible, suppressions ignorées', {
-      previousActiveCount: activeCountBeforeSync,
-      scannedCount,
-      threshold: removalThreshold,
-    });
-  }
-
-  if (runRemovals) {
-    const tsRemoved = now();
-    const teamsWithKnownStatus = teamsRepo.findTeamsWithStatusIn(['new', 'active', 'changed']);
-    for (const team of teamsWithKnownStatus) {
-      if (!scanTeamApiIds.has(team.team_api_id)) {
-        result.removedTeams.push({
-          team_api_id: team.team_api_id,
-          team_name: team.team_name,
-          team_id: team.id,
-          detectedAt: tsRemoved,
-        });
-        forgetTeamAndRemoveFromDb(team);
-      }
-    }
-    if (result.removedTeams.length > 0) {
-      teamsLogger.info('syncTeamsWithDatabase: équipes absentes du scan (désinscrites)', {
-        count: result.removedTeams.length,
-        team_api_ids: result.removedTeams.map((r) => r.team_api_id),
       });
     }
   }
