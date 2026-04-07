@@ -4,7 +4,7 @@
  */
 
 import type { Client, RESTPostAPIApplicationCommandsJSONBody } from 'discord.js';
-import { SlashCommandBuilder } from 'discord.js';
+import { ChannelType, SlashCommandBuilder } from 'discord.js';
 
 function tryCommandToJSON(
   label: string,
@@ -87,6 +87,112 @@ export async function registerCommands(client: Client<true>): Promise<void> {
                 .setName('name')
                 .setDescription('Nom ou partie du nom de l’équipe')
                 .setRequired(true)
+            )
+        )
+        .toJSON()
+    ),
+    tryCommandToJSON('ouat', () =>
+      new SlashCommandBuilder()
+        .setName('ouat')
+        .setDescription('Outils OUATventure : audit lecture seule et liaisons manuelles (SQLite).')
+        .addSubcommand((sc) =>
+          sc
+            .setName('audit')
+            .setDescription('Audit Discord↔BDD (lecture seule).')
+            .addIntegerOption((opt) =>
+              opt
+                .setName('division')
+                .setDescription('Filtrer par numéro de division (optionnel).')
+                .setMinValue(1)
+                .setRequired(false)
+            )
+        )
+        .addSubcommand((sc) =>
+          sc
+            .setName('check')
+            .setDescription('Lister uniquement les équipes problématiques (lecture seule).')
+            .addIntegerOption((opt) =>
+              opt
+                .setName('division')
+                .setDescription('Filtrer par numéro de division (optionnel).')
+                .setMinValue(1)
+                .setRequired(false)
+            )
+        )
+        .addSubcommandGroup((group) =>
+          group
+            .setName('add')
+            .setDescription('Lier une ressource Discord existante (écriture SQLite uniquement).')
+            .addSubcommand((sc) =>
+              sc
+                .setName('channel')
+                .setDescription('Attacher un salon texte existant à une équipe (BDD).')
+                .addStringOption((opt) =>
+                  opt
+                    .setName('team_api_id')
+                    .setDescription('Identifiant API équipe (team_api_id en base)')
+                    .setRequired(true)
+                )
+                .addChannelOption((opt) =>
+                  opt
+                    .setName('salon')
+                    .setDescription('Salon texte à lier')
+                    .addChannelTypes(ChannelType.GuildText)
+                    .setRequired(true)
+                )
+                .addBooleanOption((opt) =>
+                  opt
+                    .setName('remplacer')
+                    .setDescription('Si vrai, remplace le salon actif au lieu de refuser.')
+                    .setRequired(false)
+                )
+            )
+            .addSubcommand((sc) =>
+              sc
+                .setName('role')
+                .setDescription('Attacher un rôle existant à une équipe (BDD).')
+                .addStringOption((opt) =>
+                  opt
+                    .setName('team_api_id')
+                    .setDescription('Identifiant API équipe (team_api_id en base)')
+                    .setRequired(true)
+                )
+                .addRoleOption((opt) =>
+                  opt.setName('role').setDescription('Rôle Discord à lier').setRequired(true)
+                )
+                .addBooleanOption((opt) =>
+                  opt
+                    .setName('remplacer')
+                    .setDescription('Si vrai, remplace le rôle actif au lieu de refuser.')
+                    .setRequired(false)
+                )
+            )
+        )
+        .addSubcommandGroup((group) =>
+          group
+            .setName('remove')
+            .setDescription('Détacher salon ou rôle actif en base (sans toucher à Discord).')
+            .addSubcommand((sc) =>
+              sc
+                .setName('channel')
+                .setDescription('Retirer le salon actif de team_discord_state (BDD).')
+                .addStringOption((opt) =>
+                  opt
+                    .setName('team_api_id')
+                    .setDescription('Identifiant API équipe (team_api_id en base)')
+                    .setRequired(true)
+                )
+            )
+            .addSubcommand((sc) =>
+              sc
+                .setName('role')
+                .setDescription('Retirer le rôle actif de team_discord_state (BDD).')
+                .addStringOption((opt) =>
+                  opt
+                    .setName('team_api_id')
+                    .setDescription('Identifiant API équipe (team_api_id en base)')
+                    .setRequired(true)
+                )
             )
         )
         .toJSON()

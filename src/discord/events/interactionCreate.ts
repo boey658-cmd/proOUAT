@@ -14,6 +14,14 @@ import {
   handleDbAnomaliesCommand,
   handleDbTeamCommand,
 } from '../../modules/dbRead/index.js';
+import {
+  handleOuatAuditCommand,
+  handleOuatCheckCommand,
+  handleOuatAddChannelCommand,
+  handleOuatAddRoleCommand,
+  handleOuatRemoveChannelCommand,
+  handleOuatRemoveRoleCommand,
+} from '../../commands/ouat.js';
 
 export function registerInteractionCreateEvent(client: Client): void {
   client.on('interactionCreate', async (interaction) => {
@@ -49,6 +57,15 @@ export function registerInteractionCreateEvent(client: Client): void {
           const sub = interaction.options.getSubcommand();
           if (sub === 'anomalies') await handleDbAnomaliesCommand(interaction);
           else if (sub === 'team') await handleDbTeamCommand(interaction);
+        } else if (interaction.commandName === 'ouat') {
+          const sub = interaction.options.getSubcommand();
+          const subGroup = interaction.options.getSubcommandGroup(false);
+          if (sub === 'audit') await handleOuatAuditCommand(interaction);
+          else if (sub === 'check') await handleOuatCheckCommand(interaction);
+          else if (subGroup === 'add' && sub === 'channel') await handleOuatAddChannelCommand(interaction);
+          else if (subGroup === 'add' && sub === 'role') await handleOuatAddRoleCommand(interaction);
+          else if (subGroup === 'remove' && sub === 'channel') await handleOuatRemoveChannelCommand(interaction);
+          else if (subGroup === 'remove' && sub === 'role') await handleOuatRemoveRoleCommand(interaction);
         }
       }
     } catch (err) {

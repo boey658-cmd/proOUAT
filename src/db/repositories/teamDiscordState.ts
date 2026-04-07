@@ -15,6 +15,58 @@ export function findTeamDiscordStateByTeamId(teamId: number): TeamDiscordStateRo
   return (stmt.get(teamId) as TeamDiscordStateRow | undefined) ?? null;
 }
 
+/**
+ * Fusionne un patch avec l’état existant puis upsert (évite d’écraser des champs non fournis).
+ */
+export function mergeUpsertTeamDiscordState(
+  teamId: number,
+  patch: Partial<{
+    active_guild_id: string | null;
+    active_role_id: string | null;
+    active_channel_id: string | null;
+    active_category_id: string | null;
+  }>
+): void {
+  const cur = findTeamDiscordStateByTeamId(teamId);
+  upsertTeamDiscordState(teamId, {
+    active_guild_id:
+      patch.active_guild_id !== undefined ? patch.active_guild_id : cur?.active_guild_id ?? null,
+    active_role_id:
+      patch.active_role_id !== undefined ? patch.active_role_id : cur?.active_role_id ?? null,
+    active_channel_id:
+      patch.active_channel_id !== undefined ? patch.active_channel_id : cur?.active_channel_id ?? null,
+    active_category_id:
+      patch.active_category_id !== undefined ? patch.active_category_id : cur?.active_category_id ?? null,
+  });
+}
+
+/** Autre équipe ayant déjà ce salon comme actif (si aucune : null). */
+export function findOtherTeamIdWithActiveChannelId(
+  channelId: string,
+  excludeTeamId: number
+): number | null {
+  const id = channelId.trim();
+  if (!id) return null;
+  const db = getDatabase();
+  const stmt = db.prepare(
+    'SELECT team_id FROM team_discord_state WHERE active_channel_id = ? AND team_id != ? LIMIT 1'
+  );
+  const row = stmt.get(id, excludeTeamId) as { team_id: number } | undefined;
+  return row?.team_id ?? null;
+}
+
+/** Autre équipe ayant déjà ce rôle comme actif (si aucune : null). */
+export function findOtherTeamIdWithActiveRoleId(roleId: string, excludeTeamId: number): number | null {
+  const id = roleId.trim();
+  if (!id) return null;
+  const db = getDatabase();
+  const stmt = db.prepare(
+    'SELECT team_id FROM team_discord_state WHERE active_role_id = ? AND team_id != ? LIMIT 1'
+  );
+  const row = stmt.get(id, excludeTeamId) as { team_id: number } | undefined;
+  return row?.team_id ?? null;
+}
+
 export function upsertTeamDiscordState(
   teamId: number,
   data: {
