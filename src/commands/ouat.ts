@@ -20,6 +20,7 @@ import {
   buildOuatLinksReport,
   type OuatLinksVue,
 } from '../modules/ouatventure/commands/ouatLinks.js';
+import { buildOuatCoverageReport } from '../modules/ouatventure/commands/ouatCoverage.js';
 import {
   applyOuatAddChannel,
   applyOuatAddRole,
@@ -142,6 +143,38 @@ export async function handleOuatOverviewCommand(interaction: ChatInputCommandInt
     const file = new AttachmentBuilder(buf, { name: `ouat-overview-${guild.id}-${Date.now()}.txt` });
     await interaction.editReply({
       content: 'Résumé trop long — voir le fichier joint (lecture seule).',
+      files: [file],
+    }).catch(() => {});
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await interaction.editReply({ content: `Erreur : ${message}` }).catch(() => {});
+  }
+}
+
+/** /ouat coverage */
+export async function handleOuatCoverageCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (!(await ensureStaffGuild(interaction))) return;
+
+  await interaction.deferReply({ ephemeral: true });
+  const guild = interaction.guild!;
+
+  const divisionOpt = interaction.options.getInteger('division');
+  const division = divisionOpt != null && divisionOpt >= 1 ? divisionOpt : null;
+
+  try {
+    const text = buildOuatCoverageReport({
+      guildId: guild.id,
+      guildName: guild.name,
+      division,
+    });
+    if (text.length <= 2000) {
+      await interaction.editReply({ content: text }).catch(() => {});
+      return;
+    }
+    const buf = Buffer.from(text, 'utf8');
+    const file = new AttachmentBuilder(buf, { name: `ouat-coverage-${guild.id}-${Date.now()}.txt` });
+    await interaction.editReply({
+      content: 'Rapport coverage — fichier joint (lecture seule).',
       files: [file],
     }).catch(() => {});
   } catch (err) {

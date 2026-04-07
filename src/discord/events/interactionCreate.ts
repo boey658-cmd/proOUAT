@@ -19,6 +19,7 @@ import {
   handleOuatCheckCommand,
   handleOuatOverviewCommand,
   handleOuatLinksCommand,
+  handleOuatCoverageCommand,
   handleOuatAddChannelCommand,
   handleOuatAddRoleCommand,
   handleOuatRemoveChannelCommand,
@@ -66,6 +67,7 @@ export function registerInteractionCreateEvent(client: Client): void {
           else if (sub === 'check') await handleOuatCheckCommand(interaction);
           else if (sub === 'overview') await handleOuatOverviewCommand(interaction);
           else if (sub === 'links') await handleOuatLinksCommand(interaction);
+          else if (sub === 'coverage') await handleOuatCoverageCommand(interaction);
           else if (subGroup === 'add' && sub === 'channel') await handleOuatAddChannelCommand(interaction);
           else if (subGroup === 'add' && sub === 'role') await handleOuatAddRoleCommand(interaction);
           else if (subGroup === 'remove' && sub === 'channel') await handleOuatRemoveChannelCommand(interaction);

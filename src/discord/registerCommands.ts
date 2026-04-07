@@ -175,6 +175,18 @@ export async function registerCommands(client: Client<true>): Promise<void> {
                 .setRequired(false)
             )
         )
+        .addSubcommand((sc) =>
+          sc
+            .setName('coverage')
+            .setDescription('Diagnostic comptage teams vs overview/links (lecture seule).')
+            .addIntegerOption((opt) =>
+              opt
+                .setName('division')
+                .setDescription('Même filtre division que overview/links (optionnel).')
+                .setMinValue(1)
+                .setRequired(false)
+            )
+        )
         .addSubcommandGroup((group) =>
           group
             .setName('add')
