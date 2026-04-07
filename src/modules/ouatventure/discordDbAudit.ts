@@ -28,6 +28,9 @@ export type AuditTeamStatus =
   | 'ORPHAN_DB_REFERENCE'
   | 'NO_DISCORD_STATE';
 
+/** Libellé / tri /ouat check uniquement (audit conserve \`line.status\`). */
+export type OuatCheckHumanStatus = AuditTeamStatus | 'CHECK_CHANNEL_ID_MISSING_IN_STATE' | 'CHECK_ROLE_ID_MISSING_IN_STATE';
+
 export interface AuditTeamLine {
   teamId: number;
   teamApiId: string;
@@ -38,6 +41,10 @@ export interface AuditTeamLine {
   checkHints?: {
     /** Seul écart notable : catégorie OK sur Discord mais ligne catégorie absente dans discord_resources (sr, sc, sk tous renseignés et OK côté Discord). */
     categoryResourceGapOnly: boolean;
+    /** Seuls écarts « organisation » : catégorie / discord_resources côté catégorie, sans problème salon+rôle actionnable. */
+    checkSecondaryOnly: boolean;
+    /** Statut affiché et utilisé pour le tri dans /ouat check. */
+    humanStatus: OuatCheckHumanStatus;
     /** Tri liste principale (plus petit = plus urgent). */
     priority: number;
   };
@@ -74,9 +81,12 @@ export function isAuditProblemStatus(status: AuditTeamStatus): boolean {
  * Texte compact pour /ouat check (une ligne lisible par équipe à problème).
  */
 export function formatCheckHumanLine(line: AuditTeamLine): string {
-  const statusFr: Partial<Record<AuditTeamStatus, string>> = {
+  const hu = line.checkHints?.humanStatus ?? line.status;
+  const statusFr: Partial<Record<OuatCheckHumanStatus, string>> = {
     MISSING_ROLE: 'rôle manquant ou invalide sur Discord',
     MISSING_CHANNEL: 'salon texte manquant ou invalide sur Discord',
+    CHECK_CHANNEL_ID_MISSING_IN_STATE: 'salon texte non renseigné dans le state',
+    CHECK_ROLE_ID_MISSING_IN_STATE: 'rôle non renseigné dans le state',
     MISSING_CATEGORY: 'catégorie manquante ou invalide sur Discord',
     MISSING_MULTIPLE: 'plusieurs ressources manquantes ou invalides',
     ROLE_RECOVERABLE_BY_NAME: 'rôle absent — récupération possible par nom (1 candidat)',
@@ -89,43 +99,48 @@ export function formatCheckHumanLine(line: AuditTeamLine): string {
     ORPHAN_DB_REFERENCE: 'référence BDD vers une ressource introuvable sur Discord',
     NO_DISCORD_STATE: 'pas d’état Discord actif en base',
   };
-  let label = statusFr[line.status] ?? line.status;
+  let label = statusFr[hu] ?? hu;
   if (line.checkHints?.categoryResourceGapOnly) {
     label =
       'écart BDD secondaire : catégorie absente de discord_resources (OK sur Discord ; rôle + salon OK)';
+  } else if (line.checkHints?.checkSecondaryOnly) {
+    label = `secondaire (organisation / BDD) : ${statusFr[hu] ?? hu}`;
   }
   return `• **${line.teamName}** (\`${line.teamApiId}\`) — ${label}\n  └ ${line.detail.slice(0, 280)}${line.detail.length > 280 ? '…' : ''}`;
 }
 
 /** Priorité d’affichage /ouat check : plus petit = plus actionnable en premier. */
-export function computeOuatCheckPriority(status: AuditTeamStatus): number {
-  switch (status) {
+export function computeOuatCheckPriority(human: OuatCheckHumanStatus): number {
+  switch (human) {
     case 'MISSING_CHANNEL':
       return 1;
-    case 'MISSING_ROLE':
+    case 'CHANNEL_RECOVERABLE_BY_NAME':
       return 2;
-    case 'MISSING_CATEGORY':
+    case 'AMBIGUOUS_CHANNEL_MATCH':
       return 3;
-    case 'MISSING_MULTIPLE':
+    case 'CHECK_CHANNEL_ID_MISSING_IN_STATE':
       return 4;
-    case 'NO_DISCORD_STATE':
+    case 'MISSING_ROLE':
       return 5;
     case 'ROLE_RECOVERABLE_BY_NAME':
       return 6;
-    case 'CHANNEL_RECOVERABLE_BY_NAME':
-      return 7;
-    case 'CATEGORY_RECOVERABLE_BY_NAME':
-      return 8;
     case 'AMBIGUOUS_ROLE_MATCH':
-      return 9;
-    case 'AMBIGUOUS_CHANNEL_MATCH':
+      return 7;
+    case 'CHECK_ROLE_ID_MISSING_IN_STATE':
+      return 8;
+    case 'MISSING_MULTIPLE':
       return 10;
-    case 'AMBIGUOUS_CATEGORY_MATCH':
+    case 'NO_DISCORD_STATE':
       return 11;
     case 'ORPHAN_DB_REFERENCE':
       return 12;
     case 'STATE_RESOURCES_MISMATCH':
       return 13;
+    /* Catégorie : toujours après l’actionnable salon/rôle / mismatches forts */
+    case 'MISSING_CATEGORY':
+    case 'CATEGORY_RECOVERABLE_BY_NAME':
+    case 'AMBIGUOUS_CATEGORY_MATCH':
+      return 80;
     case 'OK':
       return 99;
     default:
@@ -144,7 +159,7 @@ export function partitionOuatCheckLines(lines: AuditTeamLine[]): {
   const secondary: AuditTeamLine[] = [];
   for (const line of lines) {
     if (line.status === 'OK') continue;
-    if (line.checkHints?.categoryResourceGapOnly) {
+    if (line.checkHints?.categoryResourceGapOnly || line.checkHints?.checkSecondaryOnly) {
       secondary.push(line);
       continue;
     }
@@ -286,6 +301,102 @@ function isEmptyState(state: ReturnType<typeof teamDiscordStateRepo.findTeamDisc
   const c = state.active_channel_id?.trim() ?? '';
   const k = state.active_category_id?.trim() ?? '';
   return !r && !c && !k;
+}
+
+/**
+ * Ce que /ouat check doit mettre en avant (sans modifier le statut d’audit).
+ * Ordre métier : salon Discord → salon dans le state → rôle Discord → rôle dans le state → ambigu → reste.
+ */
+function computeOuatCheckHumanMeta(input: {
+  finalStatus: AuditTeamStatus;
+  emptyState: boolean;
+  state: ReturnType<typeof teamDiscordStateRepo.findTeamDiscordStateByTeamId>;
+  fetchGuild: Guild | null;
+  sc: string;
+  sr: string;
+  chSt: ExistsKind;
+  roleSt: ExistsKind;
+  candidates: Set<AuditTeamStatus>;
+  strongNonCategoryMismatch: boolean;
+  categoryResourceGapOnly: boolean;
+}): { humanStatus: OuatCheckHumanStatus; checkSecondaryOnly: boolean; priority: number } {
+  const {
+    finalStatus,
+    emptyState,
+    state,
+    fetchGuild,
+    sc,
+    sr,
+    chSt,
+    roleSt,
+    candidates,
+    strongNonCategoryMismatch,
+    categoryResourceGapOnly,
+  } = input;
+
+  let humanStatus: OuatCheckHumanStatus = finalStatus;
+  let checkSecondaryOnly = false;
+
+  if (categoryResourceGapOnly) {
+    humanStatus = 'STATE_RESOURCES_MISMATCH';
+    return {
+      humanStatus,
+      checkSecondaryOnly: false,
+      priority: computeOuatCheckPriority(humanStatus) + 100,
+    };
+  }
+
+  if (emptyState || !state) {
+    humanStatus = 'NO_DISCORD_STATE';
+    return { humanStatus, checkSecondaryOnly, priority: computeOuatCheckPriority(humanStatus) };
+  }
+
+  if (!fetchGuild) {
+    humanStatus = 'ORPHAN_DB_REFERENCE';
+    return { humanStatus, checkSecondaryOnly, priority: computeOuatCheckPriority(humanStatus) };
+  }
+
+  if (sc && chSt !== 'ok') {
+    if (candidates.has('CHANNEL_RECOVERABLE_BY_NAME')) humanStatus = 'CHANNEL_RECOVERABLE_BY_NAME';
+    else if (candidates.has('AMBIGUOUS_CHANNEL_MATCH')) humanStatus = 'AMBIGUOUS_CHANNEL_MATCH';
+    else humanStatus = 'MISSING_CHANNEL';
+    return { humanStatus, checkSecondaryOnly, priority: computeOuatCheckPriority(humanStatus) };
+  }
+
+  if (!sc) {
+    humanStatus = 'CHECK_CHANNEL_ID_MISSING_IN_STATE';
+    return { humanStatus, checkSecondaryOnly, priority: computeOuatCheckPriority(humanStatus) };
+  }
+
+  if (sr && roleSt !== 'ok') {
+    if (candidates.has('ROLE_RECOVERABLE_BY_NAME')) humanStatus = 'ROLE_RECOVERABLE_BY_NAME';
+    else if (candidates.has('AMBIGUOUS_ROLE_MATCH')) humanStatus = 'AMBIGUOUS_ROLE_MATCH';
+    else humanStatus = 'MISSING_ROLE';
+    return { humanStatus, checkSecondaryOnly, priority: computeOuatCheckPriority(humanStatus) };
+  }
+
+  if (!sr) {
+    humanStatus = 'CHECK_ROLE_ID_MISSING_IN_STATE';
+    return { humanStatus, checkSecondaryOnly, priority: computeOuatCheckPriority(humanStatus) };
+  }
+
+  /* Ici : salon + rôle présents et valides sur Discord. */
+  humanStatus = finalStatus;
+  if (
+    !strongNonCategoryMismatch &&
+    (finalStatus === 'MISSING_CATEGORY' ||
+      finalStatus === 'CATEGORY_RECOVERABLE_BY_NAME' ||
+      finalStatus === 'AMBIGUOUS_CATEGORY_MATCH' ||
+      finalStatus === 'STATE_RESOURCES_MISMATCH')
+  ) {
+    checkSecondaryOnly = true;
+  }
+
+  return {
+    humanStatus,
+    checkSecondaryOnly,
+    priority: computeOuatCheckPriority(humanStatus) + (checkSecondaryOnly ? 100 : 0),
+  };
 }
 
 /** Priorité : premier élément de la liste gagne. */
@@ -449,34 +560,40 @@ export async function runDiscordDbAuditReadOnly(
       notes.push('active_category_id non présent dans discord_resources actifs (clé guild).');
     }
 
-    let resourceIdMismatch = false;
+    let resourceIdMismatchRole = false;
+    let resourceIdMismatchChannel = false;
+    let resourceIdMismatchCategory = false;
     for (const r of byType.role) {
       if (sr && r.discord_resource_id !== sr) {
-        resourceIdMismatch = true;
+        resourceIdMismatchRole = true;
         notes.push(`Ressource role en base (${r.discord_resource_id}) ≠ state (${sr}).`);
         break;
       }
     }
     for (const r of byType.channel) {
       if (sc && r.discord_resource_id !== sc) {
-        resourceIdMismatch = true;
+        resourceIdMismatchChannel = true;
         notes.push(`Ressource channel en base (${r.discord_resource_id}) ≠ state (${sc}).`);
         break;
       }
     }
     for (const r of byType.category) {
       if (sk && r.discord_resource_id !== sk) {
-        resourceIdMismatch = true;
+        resourceIdMismatchCategory = true;
         notes.push(`Ressource category en base (${r.discord_resource_id}) ≠ state (${sk}).`);
         break;
       }
     }
-    if (resourceIdMismatch) candidates.push('STATE_RESOURCES_MISMATCH');
+    if (resourceIdMismatchRole || resourceIdMismatchChannel || resourceIdMismatchCategory) {
+      candidates.push('STATE_RESOURCES_MISMATCH');
+    }
 
     const resWithoutState =
       (byType.role.length > 0 && !sr) ||
       (byType.channel.length > 0 && !sc) ||
       (byType.category.length > 0 && !sk);
+    const resWithoutStateNonCategory =
+      (byType.role.length > 0 && !sr) || (byType.channel.length > 0 && !sc);
     if (resWithoutState) {
       candidates.push('STATE_RESOURCES_MISMATCH');
       notes.push('Actif dans discord_resources sans colonne correspondante dans team_discord_state.');
@@ -602,8 +719,22 @@ export async function runDiscordDbAuditReadOnly(
       byType.category.length > 1 ||
       (!!sr && !roleIdsRes.has(sr)) ||
       (!!sc && !channelIdsRes.has(sc)) ||
-      resourceIdMismatch ||
+      resourceIdMismatchRole ||
+      resourceIdMismatchChannel ||
+      resourceIdMismatchCategory ||
       resWithoutState ||
+      crossGuildResourcesConflict;
+
+    /** Mismatch actionnable hors bruit catégorie / discord_resources catégorie. */
+    const strongNonCategoryMismatch =
+      (!!stateGuildId && stateGuildId !== auditedGuildId) ||
+      byType.role.length > 1 ||
+      byType.channel.length > 1 ||
+      (!!sr && !roleIdsRes.has(sr)) ||
+      (!!sc && !channelIdsRes.has(sc)) ||
+      resourceIdMismatchRole ||
+      resourceIdMismatchChannel ||
+      resWithoutStateNonCategory ||
       crossGuildResourcesConflict;
 
     const categoryResourceGapOnly =
@@ -619,7 +750,20 @@ export async function runDiscordDbAuditReadOnly(
       chSt === 'ok' &&
       roleSt === 'ok';
 
-    const priority = computeOuatCheckPriority(finalStatus);
+    const candSet = new Set(uniqueCandidates);
+    const { humanStatus, checkSecondaryOnly, priority } = computeOuatCheckHumanMeta({
+      finalStatus,
+      emptyState,
+      state,
+      fetchGuild,
+      sc,
+      sr,
+      chSt,
+      roleSt,
+      candidates: candSet,
+      strongNonCategoryMismatch,
+      categoryResourceGapOnly,
+    });
 
     missByTeamId.set(team.id, missFlags);
     lines.push({
@@ -630,6 +774,8 @@ export async function runDiscordDbAuditReadOnly(
       detail: notes.join(' '),
       checkHints: {
         categoryResourceGapOnly,
+        checkSecondaryOnly,
+        humanStatus,
         priority,
       },
     });
