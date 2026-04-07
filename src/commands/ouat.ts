@@ -17,6 +17,10 @@ import {
   type OuatOverviewVue,
 } from '../modules/ouatventure/commands/ouatOverview.js';
 import {
+  buildOuatLinksReport,
+  type OuatLinksVue,
+} from '../modules/ouatventure/commands/ouatLinks.js';
+import {
   applyOuatAddChannel,
   applyOuatAddRole,
   applyOuatRemoveChannel,
@@ -113,6 +117,7 @@ export async function handleOuatAuditCommand(interaction: ChatInputCommandIntera
 }
 
 const OVERVIEW_VUES: OuatOverviewVue[] = ['tout', 'roles', 'salons', 'categories', 'problemes'];
+const LINKS_VUES: OuatLinksVue[] = ['all', 'problems', 'ok', 'roles', 'channels'];
 
 /** /ouat overview */
 export async function handleOuatOverviewCommand(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -137,6 +142,39 @@ export async function handleOuatOverviewCommand(interaction: ChatInputCommandInt
     const file = new AttachmentBuilder(buf, { name: `ouat-overview-${guild.id}-${Date.now()}.txt` });
     await interaction.editReply({
       content: 'Résumé trop long — voir le fichier joint (lecture seule).',
+      files: [file],
+    }).catch(() => {});
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await interaction.editReply({ content: `Erreur : ${message}` }).catch(() => {});
+  }
+}
+
+/** /ouat links */
+export async function handleOuatLinksCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (!(await ensureStaffGuild(interaction))) return;
+
+  await interaction.deferReply({ ephemeral: true });
+  const guild = interaction.guild!;
+
+  const divisionOpt = interaction.options.getInteger('division');
+  const division = divisionOpt != null && divisionOpt >= 1 ? divisionOpt : null;
+  const vueRaw = interaction.options.getString('vue');
+  const vue: OuatLinksVue =
+    vueRaw != null && (LINKS_VUES as string[]).includes(vueRaw) ? (vueRaw as OuatLinksVue) : 'all';
+  const teamApiIdRaw = interaction.options.getString('team_api_id');
+  const teamApiId = teamApiIdRaw?.trim() ? teamApiIdRaw.trim() : null;
+
+  try {
+    const text = await buildOuatLinksReport({ guild, division, vue, teamApiId });
+    if (text.length <= 2000) {
+      await interaction.editReply({ content: text }).catch(() => {});
+      return;
+    }
+    const buf = Buffer.from(text, 'utf8');
+    const file = new AttachmentBuilder(buf, { name: `ouat-links-${guild.id}-${Date.now()}.txt` });
+    await interaction.editReply({
+      content: 'Rapport trop long — fichier joint (lecture seule).',
       files: [file],
     }).catch(() => {});
   } catch (err) {

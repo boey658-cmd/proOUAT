@@ -144,6 +144,37 @@ export async function registerCommands(client: Client<true>): Promise<void> {
                 )
             )
         )
+        .addSubcommand((sc) =>
+          sc
+            .setName('links')
+            .setDescription('Liaisons team ↔ Discord (IDs + noms, lecture seule).')
+            .addIntegerOption((opt) =>
+              opt
+                .setName('division')
+                .setDescription('Filtrer par numéro de division (optionnel).')
+                .setMinValue(1)
+                .setRequired(false)
+            )
+            .addStringOption((opt) =>
+              opt
+                .setName('vue')
+                .setDescription('Filtrer les équipes listées.')
+                .setRequired(false)
+                .addChoices(
+                  { name: 'Toutes', value: 'all' },
+                  { name: 'Problèmes uniquement', value: 'problems' },
+                  { name: 'OK uniquement', value: 'ok' },
+                  { name: 'Souci rôle', value: 'roles' },
+                  { name: 'Souci salon', value: 'channels' }
+                )
+            )
+            .addStringOption((opt) =>
+              opt
+                .setName('team_api_id')
+                .setDescription('Cibler une seule équipe (team_api_id en base).')
+                .setRequired(false)
+            )
+        )
         .addSubcommandGroup((group) =>
           group
             .setName('add')

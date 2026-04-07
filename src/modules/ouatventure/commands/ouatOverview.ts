@@ -27,7 +27,7 @@ interface ClassifiedTeam {
   bucket: 'ok' | 'partiel' | 'probleme';
 }
 
-function collectTeamsForGuild(guildId: string, divisionFilter: number | null): TeamRow[] {
+export function collectTeamsForGuild(guildId: string, divisionFilter: number | null): TeamRow[] {
   const all = teamsRepo.findAllTeams().filter((t) => t.status !== 'archived');
   const divFiltered =
     divisionFilter != null ? all.filter((t) => t.division_number === divisionFilter) : all;
