@@ -34,6 +34,13 @@ export interface AuditTeamLine {
   teamName: string;
   status: AuditTeamStatus;
   detail: string;
+  /** Indices pour /ouat check (n’altère pas le détail ni le statut de /ouat audit). */
+  checkHints?: {
+    /** Seul écart notable : catégorie OK sur Discord mais ligne catégorie absente dans discord_resources (sr, sc, sk tous renseignés et OK côté Discord). */
+    categoryResourceGapOnly: boolean;
+    /** Tri liste principale (plus petit = plus urgent). */
+    priority: number;
+  };
 }
 
 export interface AuditTotals {
@@ -82,8 +89,72 @@ export function formatCheckHumanLine(line: AuditTeamLine): string {
     ORPHAN_DB_REFERENCE: 'référence BDD vers une ressource introuvable sur Discord',
     NO_DISCORD_STATE: 'pas d’état Discord actif en base',
   };
-  const label = statusFr[line.status] ?? line.status;
+  let label = statusFr[line.status] ?? line.status;
+  if (line.checkHints?.categoryResourceGapOnly) {
+    label =
+      'écart BDD secondaire : catégorie absente de discord_resources (OK sur Discord ; rôle + salon OK)';
+  }
   return `• **${line.teamName}** (\`${line.teamApiId}\`) — ${label}\n  └ ${line.detail.slice(0, 280)}${line.detail.length > 280 ? '…' : ''}`;
+}
+
+/** Priorité d’affichage /ouat check : plus petit = plus actionnable en premier. */
+export function computeOuatCheckPriority(status: AuditTeamStatus): number {
+  switch (status) {
+    case 'MISSING_CHANNEL':
+      return 1;
+    case 'MISSING_ROLE':
+      return 2;
+    case 'MISSING_CATEGORY':
+      return 3;
+    case 'MISSING_MULTIPLE':
+      return 4;
+    case 'NO_DISCORD_STATE':
+      return 5;
+    case 'ROLE_RECOVERABLE_BY_NAME':
+      return 6;
+    case 'CHANNEL_RECOVERABLE_BY_NAME':
+      return 7;
+    case 'CATEGORY_RECOVERABLE_BY_NAME':
+      return 8;
+    case 'AMBIGUOUS_ROLE_MATCH':
+      return 9;
+    case 'AMBIGUOUS_CHANNEL_MATCH':
+      return 10;
+    case 'AMBIGUOUS_CATEGORY_MATCH':
+      return 11;
+    case 'ORPHAN_DB_REFERENCE':
+      return 12;
+    case 'STATE_RESOURCES_MISMATCH':
+      return 13;
+    case 'OK':
+      return 99;
+    default:
+      return 50;
+  }
+}
+
+/**
+ * Sépare les lignes pour /ouat check : liste principale (actionnable) vs secondaire (écart discord_resources catégorie seul).
+ */
+export function partitionOuatCheckLines(lines: AuditTeamLine[]): {
+  main: AuditTeamLine[];
+  secondary: AuditTeamLine[];
+} {
+  const main: AuditTeamLine[] = [];
+  const secondary: AuditTeamLine[] = [];
+  for (const line of lines) {
+    if (line.status === 'OK') continue;
+    if (line.checkHints?.categoryResourceGapOnly) {
+      secondary.push(line);
+      continue;
+    }
+    main.push(line);
+  }
+  const byPri = (a: AuditTeamLine, b: AuditTeamLine) =>
+    (a.checkHints?.priority ?? 99) - (b.checkHints?.priority ?? 99);
+  main.sort(byPri);
+  secondary.sort(byPri);
+  return { main, secondary };
 }
 
 export function buildCheckReport(problemLines: AuditTeamLine[]): string {
@@ -518,6 +589,38 @@ export async function runDiscordDbAuditReadOnly(
     const finalStatus =
       uniqueCandidates.length === 0 ? 'OK' : pickFinalStatus(uniqueCandidates);
 
+    const crossGuildResourcesConflict =
+      !emptyState &&
+      !!stateGuildId &&
+      stateGuildId !== auditedGuildId &&
+      onAuditedGuild.length > 0;
+
+    const strongStateResourcesMismatch =
+      (!!stateGuildId && stateGuildId !== auditedGuildId) ||
+      byType.role.length > 1 ||
+      byType.channel.length > 1 ||
+      byType.category.length > 1 ||
+      (!!sr && !roleIdsRes.has(sr)) ||
+      (!!sc && !channelIdsRes.has(sc)) ||
+      resourceIdMismatch ||
+      resWithoutState ||
+      crossGuildResourcesConflict;
+
+    const categoryResourceGapOnly =
+      !!sk &&
+      !!sr &&
+      !!sc &&
+      !categoryIdsRes.has(sk) &&
+      !strongStateResourcesMismatch &&
+      !!fetchGuild &&
+      !emptyState &&
+      !!state &&
+      catSt === 'ok' &&
+      chSt === 'ok' &&
+      roleSt === 'ok';
+
+    const priority = computeOuatCheckPriority(finalStatus);
+
     missByTeamId.set(team.id, missFlags);
     lines.push({
       teamId: team.id,
@@ -525,6 +628,10 @@ export async function runDiscordDbAuditReadOnly(
       teamName: team.team_name,
       status: finalStatus,
       detail: notes.join(' '),
+      checkHints: {
+        categoryResourceGapOnly,
+        priority,
+      },
     });
   }
 

@@ -9,7 +9,7 @@ import { getAllowedStaffRoleIds, getDiscordGuildId1, getDiscordGuildId2 } from '
 import * as teamsRepo from '../db/repositories/teams.js';
 import {
   runDiscordDbAuditReadOnly,
-  isAuditProblemStatus,
+  partitionOuatCheckLines,
   buildCheckReport,
 } from '../modules/ouatventure/discordDbAudit.js';
 import {
@@ -120,15 +120,25 @@ export async function handleOuatCheckCommand(interaction: ChatInputCommandIntera
 
   try {
     const result = await runDiscordDbAuditReadOnly(interaction.client, guild, { division });
-    const problems = result.lines.filter((l) => isAuditProblemStatus(l.status));
+    const { main, secondary } = partitionOuatCheckLines(result.lines);
+    const nonOk = result.lines.filter((l) => l.status !== 'OK').length;
     const intro = [
-      '**Contrôle ciblé** (lecture seule) — équipes à traiter uniquement',
-      `Serveur \`${guild.id}\` · **${problems.length}** équipe(s) hors \`OK\` / ${result.lines.length} analysée(s).`,
+      '**Contrôle ciblé** (lecture seule)',
+      `Serveur \`${guild.id}\` · **${main.length}** équipe(s) **à traiter en priorité** · **${secondary.length}** écart(s) BDD secondaire(s) (non bloquants) · ${nonOk} hors \`OK\` / ${result.lines.length} analysée(s).`,
       '',
     ].join('\n');
 
-    const body = buildCheckReport(problems);
-    const full = `${intro}\n\n${body}`;
+    const bodyMain =
+      main.length === 0
+        ? '**À traiter (priorité)** : aucune équipe dans cette catégorie.'
+        : `**À traiter (priorité)** — tri : salon → rôle → catégorie → …\n\n${buildCheckReport(main)}`;
+
+    const bodySecondary =
+      secondary.length === 0
+        ? ''
+        : `\n\n---\n**Cohérence BDD secondaire** (historique \`discord_resources\` / catégorie ; pas d’action critique si tout est OK sur Discord)\n\n${buildCheckReport(secondary)}`;
+
+    const full = `${intro}\n\n${bodyMain}${bodySecondary}`;
 
     if (full.length <= 2000) {
       await interaction.editReply({ content: full }).catch(() => {});
