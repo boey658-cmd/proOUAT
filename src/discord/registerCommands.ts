@@ -119,6 +119,31 @@ export async function registerCommands(client: Client<true>): Promise<void> {
                 .setRequired(false)
             )
         )
+        .addSubcommand((sc) =>
+          sc
+            .setName('overview')
+            .setDescription('Résumé lisible des équipes (rôle, salon, cat.) sans ID technique.')
+            .addIntegerOption((opt) =>
+              opt
+                .setName('division')
+                .setDescription('Filtrer par numéro de division (optionnel).')
+                .setMinValue(1)
+                .setRequired(false)
+            )
+            .addStringOption((opt) =>
+              opt
+                .setName('vue')
+                .setDescription('Limiter les blocs affichés (filtre affichage).')
+                .setRequired(false)
+                .addChoices(
+                  { name: 'Tout afficher', value: 'tout' },
+                  { name: 'Rôles uniquement', value: 'roles' },
+                  { name: 'Salons uniquement', value: 'salons' },
+                  { name: 'Catégories uniquement', value: 'categories' },
+                  { name: 'Critiques (salon/rôle absent)', value: 'problemes' }
+                )
+            )
+        )
         .addSubcommandGroup((group) =>
           group
             .setName('add')

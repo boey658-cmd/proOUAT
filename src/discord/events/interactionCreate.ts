@@ -17,6 +17,7 @@ import {
 import {
   handleOuatAuditCommand,
   handleOuatCheckCommand,
+  handleOuatOverviewCommand,
   handleOuatAddChannelCommand,
   handleOuatAddRoleCommand,
   handleOuatRemoveChannelCommand,
@@ -62,6 +63,7 @@ export function registerInteractionCreateEvent(client: Client): void {
           const subGroup = interaction.options.getSubcommandGroup(false);
           if (sub === 'audit') await handleOuatAuditCommand(interaction);
           else if (sub === 'check') await handleOuatCheckCommand(interaction);
+          else if (sub === 'overview') await handleOuatOverviewCommand(interaction);
           else if (subGroup === 'add' && sub === 'channel') await handleOuatAddChannelCommand(interaction);
           else if (subGroup === 'add' && sub === 'role') await handleOuatAddRoleCommand(interaction);
           else if (subGroup === 'remove' && sub === 'channel') await handleOuatRemoveChannelCommand(interaction);

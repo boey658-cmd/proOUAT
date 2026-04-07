@@ -13,6 +13,10 @@ import {
   buildCheckReport,
 } from '../modules/ouatventure/discordDbAudit.js';
 import {
+  buildOuatOverviewReport,
+  type OuatOverviewVue,
+} from '../modules/ouatventure/commands/ouatOverview.js';
+import {
   applyOuatAddChannel,
   applyOuatAddRole,
   applyOuatRemoveChannel,
@@ -105,6 +109,39 @@ export async function handleOuatAuditCommand(interaction: ChatInputCommandIntera
     await interaction.editReply({
       content: `Erreur lors de l'audit (lecture seule) : ${message}`,
     }).catch(() => {});
+  }
+}
+
+const OVERVIEW_VUES: OuatOverviewVue[] = ['tout', 'roles', 'salons', 'categories', 'problemes'];
+
+/** /ouat overview */
+export async function handleOuatOverviewCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (!(await ensureStaffGuild(interaction))) return;
+
+  await interaction.deferReply({ ephemeral: true });
+  const guild = interaction.guild!;
+
+  const divisionOpt = interaction.options.getInteger('division');
+  const division = divisionOpt != null && divisionOpt >= 1 ? divisionOpt : null;
+  const vueRaw = interaction.options.getString('vue');
+  const vue: OuatOverviewVue =
+    vueRaw != null && (OVERVIEW_VUES as string[]).includes(vueRaw) ? (vueRaw as OuatOverviewVue) : 'tout';
+
+  try {
+    const text = await buildOuatOverviewReport(guild, { division, vue });
+    if (text.length <= 2000) {
+      await interaction.editReply({ content: text }).catch(() => {});
+      return;
+    }
+    const buf = Buffer.from(text, 'utf8');
+    const file = new AttachmentBuilder(buf, { name: `ouat-overview-${guild.id}-${Date.now()}.txt` });
+    await interaction.editReply({
+      content: 'Résumé trop long — voir le fichier joint (lecture seule).',
+      files: [file],
+    }).catch(() => {});
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await interaction.editReply({ content: `Erreur : ${message}` }).catch(() => {});
   }
 }
 
