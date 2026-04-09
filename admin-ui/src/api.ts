@@ -1,4 +1,5 @@
 import type { AdminGuildResourcesResponse, AdminTeamRow, AdminTargetGuildsMetaResponse } from './types';
+import { normalizeTargetGuildIdForApi } from './targetGuildApi';
 
 function authHeaders(): HeadersInit {
   const token = import.meta.env.VITE_ADMIN_API_TOKEN ?? '';
@@ -38,7 +39,8 @@ export interface TeamListFilters {
 
 export async function fetchTeams(filters?: TeamListFilters): Promise<AdminTeamRow[]> {
   const q = new URLSearchParams();
-  if (filters?.targetGuildId) q.set('target_guild_id', filters.targetGuildId);
+  const targetGuildId = normalizeTargetGuildIdForApi(filters?.targetGuildId);
+  if (targetGuildId) q.set('target_guild_id', targetGuildId);
   if (filters?.targetDivisionNumber !== undefined) {
     q.set('target_division_number', String(filters.targetDivisionNumber));
   }
@@ -52,7 +54,11 @@ export async function verifyAllTeams(scope: {
   targetGuildId: string;
   targetDivisionNumber?: number;
 }): Promise<AdminTeamRow[]> {
-  const q = new URLSearchParams({ target_guild_id: scope.targetGuildId });
+  const gid = normalizeTargetGuildIdForApi(scope.targetGuildId);
+  if (!gid) {
+    throw new Error('Cible serveur invalide pour la vérification globale');
+  }
+  const q = new URLSearchParams({ target_guild_id: gid });
   if (scope.targetDivisionNumber !== undefined) {
     q.set('target_division_number', String(scope.targetDivisionNumber));
   }
@@ -76,7 +82,11 @@ export async function verifyOneTeam(teamId: number): Promise<AdminTeamRow> {
 }
 
 export async function fetchGuildResources(guildId: string): Promise<AdminGuildResourcesResponse> {
-  const res = await fetch(`/admin/guilds/${encodeURIComponent(guildId)}/resources`, {
+  const gid = normalizeTargetGuildIdForApi(guildId);
+  if (!gid) {
+    throw new Error('Identifiant de serveur Discord invalide');
+  }
+  const res = await fetch(`/admin/guilds/${encodeURIComponent(gid)}/resources`, {
     headers: authHeaders(),
   });
   return handleJson<AdminGuildResourcesResponse>(res);
@@ -89,11 +99,29 @@ export interface PatchTeamPayload {
   private_channel_id?: string | null;
 }
 
+function buildSafePatchBody(body: PatchTeamPayload): PatchTeamPayload {
+  const out: PatchTeamPayload = {};
+  if (body.target_guild_id !== undefined) {
+    if (body.target_guild_id === null) {
+      out.target_guild_id = null;
+    } else {
+      const g = normalizeTargetGuildIdForApi(body.target_guild_id);
+      if (g !== undefined) out.target_guild_id = g;
+    }
+  }
+  if (body.target_division_number !== undefined) {
+    out.target_division_number = body.target_division_number;
+  }
+  if (body.role_id !== undefined) out.role_id = body.role_id;
+  if (body.private_channel_id !== undefined) out.private_channel_id = body.private_channel_id;
+  return out;
+}
+
 export async function patchTeam(teamId: number, body: PatchTeamPayload): Promise<AdminTeamRow> {
   const res = await fetch(`/admin/teams/${teamId}`, {
     method: 'PATCH',
     headers: authHeaders(),
-    body: JSON.stringify(body),
+    body: JSON.stringify(buildSafePatchBody(body)),
   });
   const data = await handleJson<{ team: AdminTeamRow }>(res);
   return data.team;

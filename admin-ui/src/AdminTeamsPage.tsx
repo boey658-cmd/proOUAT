@@ -11,6 +11,7 @@ import {
 } from './api';
 import { rowBackgroundForStatus, statusBadgeStyle } from './statusStyle';
 import { formatLastVerifiedLine } from './formatVerified';
+import { normalizeTargetGuildIdForApi } from './targetGuildApi';
 
 /** Valeur du select « Serveur actif » = toutes les équipes (sans filtre API `target_guild_id`). */
 const ALL_SERVERS = '';
@@ -103,7 +104,7 @@ export function AdminTeamsPage() {
     setError(null);
     setLoading(true);
     try {
-      if (isAllServers) {
+      if (selectedServerId === ALL_SERVERS) {
         const teams = await fetchTeams(undefined);
         if (divisionScope !== 'all') {
           setRows(teams.filter((r) => r.target_division_number === divisionScope));
@@ -111,8 +112,16 @@ export function AdminTeamsPage() {
           setRows(teams);
         }
       } else {
+        const gid = normalizeTargetGuildIdForApi(selectedServerId);
+        if (!gid) {
+          setRows([]);
+          setError(
+            'Le serveur sélectionné n’a pas d’identifiant Discord valide. Rechargez la page après vérification de la config.'
+          );
+          return;
+        }
         const teams = await fetchTeams({
-          targetGuildId: selectedServerId,
+          targetGuildId: gid,
           targetDivisionNumber: divisionScope === 'all' ? undefined : divisionScope,
         });
         setRows(teams);
@@ -162,8 +171,12 @@ export function AdminTeamsPage() {
 
   const startEdit = async (row: AdminTeamRow) => {
     setError(null);
-    const gid = row.target_guild_id ?? (selectedServerId !== ALL_SERVERS ? selectedServerId : defaultGuildForResources);
-    if (!gid) {
+    const fromRow = normalizeTargetGuildIdForApi(row.target_guild_id);
+    const fromScope =
+      selectedServerId !== ALL_SERVERS ? normalizeTargetGuildIdForApi(selectedServerId) : undefined;
+    const fromDefault = normalizeTargetGuildIdForApi(defaultGuildForResources);
+    const resolvedGuild = fromRow ?? fromScope ?? fromDefault ?? '';
+    if (!resolvedGuild) {
       setError(
         'Aucun serveur configuré pour charger les rôles/salons. Définissez les guilds côté bot ou choisissez un serveur cible dans le formulaire.'
       );
@@ -172,13 +185,13 @@ export function AdminTeamsPage() {
     if (globalBusy) return;
     setEditingId(row.id);
     setDraft({
-      targetGuildId: row.target_guild_id ?? (selectedServerId !== ALL_SERVERS ? selectedServerId : defaultGuildForResources),
+      targetGuildId: resolvedGuild,
       divisionStr: row.target_division_number != null ? String(row.target_division_number) : '',
       roleId: row.role_id ?? '',
       channelId: row.private_channel_id ?? '',
     });
     try {
-      const res = await fetchGuildResources(gid);
+      const res = await fetchGuildResources(resolvedGuild);
       const roles = [...res.roles];
       if (row.role_id && !roles.some((r) => r.id === row.role_id)) {
         roles.unshift({ id: row.role_id, name: '⚠ introuvable sur Discord' });
@@ -195,12 +208,13 @@ export function AdminTeamsPage() {
   };
 
   const reloadResourcesForGuild = async (guildId: string, row: AdminTeamRow) => {
-    if (!guildId.trim()) {
+    const gid = normalizeTargetGuildIdForApi(guildId);
+    if (!gid) {
       setGuildResources(null);
       return;
     }
     try {
-      const res = await fetchGuildResources(guildId.trim());
+      const res = await fetchGuildResources(gid);
       const roles = [...res.roles];
       if (row.role_id && !roles.some((r) => r.id === row.role_id)) {
         roles.unshift({ id: row.role_id, name: '⚠ introuvable sur Discord' });
@@ -239,16 +253,16 @@ export function AdminTeamsPage() {
       target_division_number = n;
     }
 
-    const tid = draft.targetGuildId.trim();
-    if (!tid) {
-      setError('Serveur cible obligatoire pour enregistrer.');
+    const normalizedGuild = normalizeTargetGuildIdForApi(draft.targetGuildId);
+    if (!normalizedGuild) {
+      setError('Choisissez un serveur cible valide (Discord 1 ou 2) pour enregistrer.');
       return;
     }
 
     setRowAction({ teamId, kind: 'save' });
     try {
       const updated = await patchTeam(teamId, {
-        target_guild_id: tid,
+        target_guild_id: normalizedGuild,
         target_division_number,
         role_id: draft.roleId.trim() === '' ? null : draft.roleId.trim(),
         private_channel_id: draft.channelId.trim() === '' ? null : draft.channelId.trim(),
