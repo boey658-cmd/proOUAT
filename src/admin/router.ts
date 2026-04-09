@@ -7,27 +7,16 @@ import type { Client } from 'discord.js';
 import { ChannelType } from 'discord.js';
 import { getAdminApiToken } from '../config/adminApi.js';
 import { isGuildIdAllowedForChannels } from '../config/discord.js';
-import { findTeamById } from '../db/repositories/teams.js';
-import {
-  findTeamDiscordStateByTeamId,
-  mergeUpsertTeamDiscordState,
-  findOtherTeamIdWithActiveChannelId,
-  findOtherTeamIdWithActiveRoleId,
-  updateTeamDiscordCachedDisplay,
-} from '../db/repositories/teamDiscordState.js';
-import { findAdminTeamJoinByTeamId } from '../db/repositories/adminTeams.js';
 import type { PatchTeamBody } from './types.js';
 import {
   loadAdminTeamRowsFromDatabase,
-  verifyAllTeamsAndPersist,
+  verifyScopedTeamsAndPersist,
   verifyOneTeamAndPersist,
 } from './service.js';
-import { resolveEffectiveGuildIdForTeam } from './effectiveGuild.js';
-import {
-  isValidDiscordSnowflake,
-  resolveDiscordDisplayNames,
-} from './verifyTeamDiscord.js';
-import { mapJoinRowToAdminTeamRow } from './mapDbToAdminTeamRow.js';
+import { isValidDiscordSnowflake } from './verifyTeamDiscord.js';
+import { patchAdminTeam } from './patchTeamAdmin.js';
+import { getTargetGuildOptions, isAllowedAdminTargetGuildId } from './targetGuilds.js';
+import { getTargetDivisionMax, getTargetDivisionMin } from './targetDivision.js';
 
 function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   const expected = getAdminApiToken();
@@ -50,13 +39,36 @@ function parseTeamIdParam(req: Request): number | null {
   return n;
 }
 
-/** undefined = champ absent du JSON ; null = explicitement vidé. */
-function normalizeOptionalSnowflake(value: unknown): string | null | undefined {
-  if (value === undefined) return undefined;
-  if (value === null) return null;
-  if (typeof value !== 'string') return undefined;
-  const t = value.trim();
-  return t === '' ? null : t;
+function parseQueryString(q: unknown): string | undefined {
+  if (q === undefined || q === null) return undefined;
+  const s = Array.isArray(q) ? q[0] : q;
+  if (typeof s !== 'string') return undefined;
+  const t = s.trim();
+  return t === '' ? undefined : t;
+}
+
+function parseQueryInt(q: unknown): number | undefined {
+  const s = parseQueryString(q);
+  if (s === undefined) return undefined;
+  const n = Number.parseInt(s, 10);
+  if (!Number.isFinite(n)) return undefined;
+  return n;
+}
+
+function parseVerifyScope(req: Request): { ok: true; targetGuildId: string; targetDivisionNumber?: number } | { ok: false; error: string } {
+  const targetGuildId = parseQueryString(req.query.target_guild_id);
+  if (!targetGuildId) {
+    return { ok: false, error: 'Query obligatoire : target_guild_id' };
+  }
+  if (!isValidDiscordSnowflake(targetGuildId)) {
+    return { ok: false, error: 'target_guild_id : snowflake invalide' };
+  }
+  if (!isAllowedAdminTargetGuildId(targetGuildId)) {
+    return { ok: false, error: 'target_guild_id : serveur non autorisé' };
+  }
+  const dn = parseQueryInt(req.query.target_division_number);
+  const targetDivisionNumber = dn === undefined ? undefined : dn;
+  return { ok: true, targetGuildId, targetDivisionNumber };
 }
 
 export function createAdminRouter(client: Client<true>): Router {
@@ -64,10 +76,34 @@ export function createAdminRouter(client: Client<true>): Router {
 
   r.use(requireAdmin);
 
-  /** Liste équipes + dernier état de vérification persisté (aucun appel Discord). */
-  r.get('/teams', (_req: Request, res: Response) => {
+  /** Guilds cibles + plage divisions (pour l’UI, sans secret). */
+  r.get('/meta/target-guilds', (_req: Request, res: Response) => {
+    res.json({
+      guilds: getTargetGuildOptions().map((g) => ({ id: g.id, label: g.label })),
+      division_min: getTargetDivisionMin(),
+      division_max: getTargetDivisionMax(),
+    });
+  });
+
+  /** Liste équipes filtrées (query optionnelles). */
+  r.get('/teams', (req: Request, res: Response) => {
     try {
-      const teams = loadAdminTeamRowsFromDatabase();
+      const targetGuildId = parseQueryString(req.query.target_guild_id);
+      const div = parseQueryInt(req.query.target_division_number);
+      if (div !== undefined && !targetGuildId) {
+        res.status(400).json({
+          error: 'target_division_number sans target_guild_id : précisez le serveur',
+        });
+        return;
+      }
+      const filters =
+        targetGuildId || div !== undefined
+          ? {
+              ...(targetGuildId ? { targetGuildId } : {}),
+              ...(div !== undefined ? { targetDivisionNumber: div } : {}),
+            }
+          : undefined;
+      const teams = loadAdminTeamRowsFromDatabase(filters);
       res.json({ teams });
     } catch (e) {
       console.error('[admin] GET /teams', e);
@@ -75,7 +111,6 @@ export function createAdminRouter(client: Client<true>): Router {
     }
   });
 
-  /** Rôles + salons texte (salon privé = texte uniquement côté PATCH). */
   r.get('/guilds/:guildId/resources', async (req: Request, res: Response) => {
     const guildId = String(req.params.guildId ?? '').trim();
     if (!isValidDiscordSnowflake(guildId)) {
@@ -113,135 +148,25 @@ export function createAdminRouter(client: Client<true>): Router {
       res.status(400).json({ error: 'Identifiant d’équipe invalide' });
       return;
     }
-    const team = findTeamById(teamId);
-    if (!team) {
-      res.status(404).json({ error: 'Équipe introuvable en base' });
+    const result = await patchAdminTeam(client, teamId, req.body as PatchTeamBody);
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
       return;
     }
-
-    const body = req.body as PatchTeamBody;
-    const nextRole = normalizeOptionalSnowflake(body.role_id);
-    const nextChannel = normalizeOptionalSnowflake(body.private_channel_id);
-    if (nextRole === undefined && nextChannel === undefined) {
-      res.status(400).json({ error: 'Aucun champ à mettre à jour : envoyez role_id et/ou private_channel_id' });
-      return;
-    }
-
-    const cur = findTeamDiscordStateByTeamId(teamId);
-    const effectiveGuildId = resolveEffectiveGuildIdForTeam(team, cur);
-
-    if (!effectiveGuildId) {
-      res.status(400).json({
-        error:
-          'Guilde effective introuvable : renseignez current_guild_id sur l’équipe ou active_guild_id dans l’état Discord',
-      });
-      return;
-    }
-    if (!isValidDiscordSnowflake(effectiveGuildId)) {
-      res.status(400).json({ error: 'Guilde effective : snowflake Discord invalide en base' });
-      return;
-    }
-
-    if (!isGuildIdAllowedForChannels(effectiveGuildId)) {
-      res.status(403).json({ error: 'Cette guilde n’est pas autorisée pour ce bot' });
-      return;
-    }
-
-    const roleVal = nextRole === undefined ? (cur?.active_role_id ?? null) : nextRole;
-    const channelVal =
-      nextChannel === undefined ? (cur?.active_channel_id ?? null) : nextChannel;
-
-    if (roleVal !== null && !isValidDiscordSnowflake(roleVal)) {
-      res.status(400).json({ error: 'role_id : snowflake Discord invalide après nettoyage' });
-      return;
-    }
-    if (channelVal !== null && !isValidDiscordSnowflake(channelVal)) {
-      res.status(400).json({ error: 'private_channel_id : snowflake Discord invalide après nettoyage' });
-      return;
-    }
-
-    let guild;
-    try {
-      guild =
-        client.guilds.cache.get(effectiveGuildId) ??
-        (await client.guilds.fetch(effectiveGuildId));
-    } catch {
-      res.status(400).json({
-        error: 'Impossible de charger la guilde Discord : vérifiez que le bot est membre du serveur',
-      });
-      return;
-    }
-
-    const finalRole = roleVal;
-    const finalChannel = channelVal;
-
-    if (finalRole !== null) {
-      await guild.roles.fetch().catch(() => undefined);
-      const role = guild.roles.cache.get(finalRole);
-      if (!role) {
-        res.status(400).json({
-          error: `Le rôle ${finalRole} n’existe pas sur la guilde ${effectiveGuildId}`,
-        });
-        return;
-      }
-      const other = findOtherTeamIdWithActiveRoleId(finalRole, teamId);
-      if (other != null) {
-        res.status(409).json({
-          error: `Conflit : ce rôle est déjà associé à l’équipe n°${other}`,
-        });
-        return;
-      }
-    }
-
-    if (finalChannel !== null) {
-      await guild.channels.fetch().catch(() => undefined);
-      const ch = guild.channels.cache.get(finalChannel);
-      if (!ch) {
-        res.status(400).json({
-          error: `Le salon ${finalChannel} n’existe pas sur la guilde ${effectiveGuildId}`,
-        });
-        return;
-      }
-      if (ch.type !== ChannelType.GuildText) {
-        res.status(400).json({
-          error: 'Le salon privé équipe doit être un salon texte (types vocaux ou autres exclus)',
-        });
-        return;
-      }
-      const other = findOtherTeamIdWithActiveChannelId(finalChannel, teamId);
-      if (other != null) {
-        res.status(409).json({
-          error: `Conflit : ce salon est déjà associé à l’équipe n°${other}`,
-        });
-        return;
-      }
-    }
-
-    mergeUpsertTeamDiscordState(teamId, {
-      active_guild_id: effectiveGuildId,
-      active_role_id: finalRole,
-      active_channel_id: finalChannel,
-    });
-
-    const names = resolveDiscordDisplayNames(guild, finalRole, finalChannel);
-    updateTeamDiscordCachedDisplay(teamId, {
-      cached_guild_name: guild.name ?? null,
-      cached_role_name: names.role_name,
-      cached_channel_name: names.channel_name,
-    });
-
-    const join = findAdminTeamJoinByTeamId(teamId);
-    if (!join) {
-      res.status(500).json({ error: 'Erreur interne : impossible de relire l’équipe après sauvegarde' });
-      return;
-    }
-
-    res.json({ team: mapJoinRowToAdminTeamRow(join) });
+    res.json({ team: result.team });
   });
 
-  r.post('/teams/verify', async (_req: Request, res: Response) => {
+  r.post('/teams/verify', async (req: Request, res: Response) => {
+    const scope = parseVerifyScope(req);
+    if (!scope.ok) {
+      res.status(400).json({ error: scope.error });
+      return;
+    }
     try {
-      const teams = await verifyAllTeamsAndPersist(client);
+      const teams = await verifyScopedTeamsAndPersist(client, {
+        targetGuildId: scope.targetGuildId,
+        targetDivisionNumber: scope.targetDivisionNumber,
+      });
       res.json({ teams });
     } catch (e) {
       console.error('[admin] POST /teams/verify', e);

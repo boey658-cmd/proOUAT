@@ -162,6 +162,8 @@ function insertTeamAndPlayers(normalized: NormalizedTeam): number {
     division_number: null,
     division_group: null,
     current_guild_id: null,
+    target_guild_id: null,
+    target_division_number: null,
     notes: null,
     created_at: ts,
     updated_at: ts,

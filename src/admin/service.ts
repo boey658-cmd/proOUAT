@@ -4,13 +4,13 @@
 
 import type { Client, Guild } from 'discord.js';
 import {
-  findAllTeamsWithDiscordState,
+  findAdminTeamJoinRows,
   findAdminTeamJoinByTeamId,
+  type AdminTeamListFilters,
 } from '../db/repositories/adminTeams.js';
 import { upsertTeamVerificationSnapshot } from '../db/repositories/teamDiscordState.js';
 import type { AdminTeamRow } from './types.js';
 import { mapJoinRowToAdminTeamRow } from './mapDbToAdminTeamRow.js';
-import { resolveEffectiveGuildId } from './effectiveGuild.js';
 import { resolveDiscordDisplayNames, verifyTeamDiscordRow } from './verifyTeamDiscord.js';
 
 async function resolveGuild(
@@ -31,9 +31,15 @@ async function resolveGuild(
   }
 }
 
+/** Cible Discord pour la vérification : uniquement target_guild_id (affectation manuelle). */
+function verificationGuildIdFromRow(row: { target_guild_id: string | null }): string | null {
+  const t = row.target_guild_id?.trim() ?? '';
+  return t === '' ? null : t;
+}
+
 /** GET /admin/teams : pas d’appel Discord. */
-export function loadAdminTeamRowsFromDatabase(): AdminTeamRow[] {
-  return findAllTeamsWithDiscordState().map(mapJoinRowToAdminTeamRow);
+export function loadAdminTeamRowsFromDatabase(filters?: AdminTeamListFilters): AdminTeamRow[] {
+  return findAdminTeamJoinRows(filters).map(mapJoinRowToAdminTeamRow);
 }
 
 function persistScanResult(
@@ -58,13 +64,24 @@ function persistScanResult(
   });
 }
 
-/** POST /admin/teams/verify — scan Discord + mise à jour du cache vérif. */
-export async function verifyAllTeamsAndPersist(client: Client<true>): Promise<AdminTeamRow[]> {
-  const raw = findAllTeamsWithDiscordState();
+export interface VerifyScope {
+  targetGuildId: string;
+  targetDivisionNumber?: number;
+}
+
+/** POST /admin/teams/verify — uniquement les équipes du scope (serveur + division optionnelle). */
+export async function verifyScopedTeamsAndPersist(
+  client: Client<true>,
+  scope: VerifyScope
+): Promise<AdminTeamRow[]> {
+  const raw = findAdminTeamJoinRows({
+    targetGuildId: scope.targetGuildId,
+    targetDivisionNumber: scope.targetDivisionNumber,
+  });
   const guildCache = new Map<string, Guild | null>();
 
   for (const row of raw) {
-    const guildId = resolveEffectiveGuildId(row.active_guild_id, row.current_guild_id);
+    const guildId = verificationGuildIdFromRow(row);
     const guild = await resolveGuild(client, guildCache, guildId);
     const verification = verifyTeamDiscordRow({
       guild,
@@ -80,10 +97,13 @@ export async function verifyAllTeamsAndPersist(client: Client<true>): Promise<Ad
     });
   }
 
-  return loadAdminTeamRowsFromDatabase();
+  return loadAdminTeamRowsFromDatabase({
+    targetGuildId: scope.targetGuildId,
+    targetDivisionNumber: scope.targetDivisionNumber,
+  });
 }
 
-/** POST /admin/teams/:id/verify */
+/** POST /admin/teams/:id/verify — utilise la target_guild_id de l’équipe. */
 export async function verifyOneTeamAndPersist(
   client: Client<true>,
   teamId: number
@@ -92,7 +112,7 @@ export async function verifyOneTeamAndPersist(
   if (!row) return null;
 
   const guildCache = new Map<string, Guild | null>();
-  const guildId = resolveEffectiveGuildId(row.active_guild_id, row.current_guild_id);
+  const guildId = verificationGuildIdFromRow(row);
   const guild = await resolveGuild(client, guildCache, guildId);
   const verification = verifyTeamDiscordRow({
     guild,
@@ -100,7 +120,12 @@ export async function verifyOneTeamAndPersist(
     roleId: row.active_role_id,
     channelId: row.active_channel_id,
   });
-  persistScanResult(teamId, { verification, guild, roleId: row.active_role_id, channelId: row.active_channel_id });
+  persistScanResult(teamId, {
+    verification,
+    guild,
+    roleId: row.active_role_id,
+    channelId: row.active_channel_id,
+  });
 
   const refreshed = findAdminTeamJoinByTeamId(teamId);
   return refreshed ? mapJoinRowToAdminTeamRow(refreshed) : null;

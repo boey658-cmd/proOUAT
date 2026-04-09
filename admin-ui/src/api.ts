@@ -1,4 +1,4 @@
-import type { AdminGuildResourcesResponse, AdminTeamRow } from './types';
+import type { AdminGuildResourcesResponse, AdminTeamRow, AdminTargetGuildsMetaResponse } from './types';
 
 function authHeaders(): HeadersInit {
   const token = import.meta.env.VITE_ADMIN_API_TOKEN ?? '';
@@ -26,14 +26,37 @@ async function handleJson<T>(res: Response): Promise<T> {
   return body as T;
 }
 
-export async function fetchTeams(): Promise<AdminTeamRow[]> {
-  const res = await fetch('/admin/teams', { headers: authHeaders() });
+export async function fetchTargetGuildsMeta(): Promise<AdminTargetGuildsMetaResponse> {
+  const res = await fetch('/admin/meta/target-guilds', { headers: authHeaders() });
+  return handleJson<AdminTargetGuildsMetaResponse>(res);
+}
+
+export interface TeamListFilters {
+  targetGuildId?: string;
+  targetDivisionNumber?: number;
+}
+
+export async function fetchTeams(filters?: TeamListFilters): Promise<AdminTeamRow[]> {
+  const q = new URLSearchParams();
+  if (filters?.targetGuildId) q.set('target_guild_id', filters.targetGuildId);
+  if (filters?.targetDivisionNumber !== undefined) {
+    q.set('target_division_number', String(filters.targetDivisionNumber));
+  }
+  const path = q.toString() ? `/admin/teams?${q}` : '/admin/teams';
+  const res = await fetch(path, { headers: authHeaders() });
   const data = await handleJson<{ teams: AdminTeamRow[] }>(res);
   return data.teams;
 }
 
-export async function verifyAllTeams(): Promise<AdminTeamRow[]> {
-  const res = await fetch('/admin/teams/verify', {
+export async function verifyAllTeams(scope: {
+  targetGuildId: string;
+  targetDivisionNumber?: number;
+}): Promise<AdminTeamRow[]> {
+  const q = new URLSearchParams({ target_guild_id: scope.targetGuildId });
+  if (scope.targetDivisionNumber !== undefined) {
+    q.set('target_division_number', String(scope.targetDivisionNumber));
+  }
+  const res = await fetch(`/admin/teams/verify?${q}`, {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({}),
@@ -59,10 +82,14 @@ export async function fetchGuildResources(guildId: string): Promise<AdminGuildRe
   return handleJson<AdminGuildResourcesResponse>(res);
 }
 
-export async function patchTeam(
-  teamId: number,
-  body: { role_id: string | null; private_channel_id: string | null }
-): Promise<AdminTeamRow> {
+export interface PatchTeamPayload {
+  target_guild_id?: string | null;
+  target_division_number?: number | null;
+  role_id?: string | null;
+  private_channel_id?: string | null;
+}
+
+export async function patchTeam(teamId: number, body: PatchTeamPayload): Promise<AdminTeamRow> {
   const res = await fetch(`/admin/teams/${teamId}`, {
     method: 'PATCH',
     headers: authHeaders(),

@@ -40,14 +40,13 @@ export function verifyTeamDiscordRow(input: {
     channel_not_found: false,
   };
 
-  // Pas d’ID guilde en base : on ne peut pas rattacher la config au bon serveur.
+  // Pas de serveur cible : la vérification se fait uniquement sur target_guild_id.
   if (flags.missing_guild_id) {
-    return finalize(flags, 'error', 'Guilde non définie');
+    return finalize(flags, 'error', 'Serveur cible non défini');
   }
 
   if (!guild) {
-    // ID présent mais guilde introuvable pour ce client (bot hors serveur, mauvais ID, etc.).
-    return finalize(flags, 'error', 'Guilde introuvable pour le bot');
+    return finalize(flags, 'error', 'Serveur cible introuvable pour le bot');
   }
 
   const rid = roleId?.trim() ?? '';

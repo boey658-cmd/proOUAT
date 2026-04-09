@@ -34,8 +34,12 @@ export interface AdminTeamRow {
   team_api_id: string;
   team_name: string;
   team_status: string;
-  guild_id: string | null;
-  /** Libellé discret pour le tableau : nom cache + id, ou id seul. */
+  /** Serveur Discord cible (affectation manuelle). */
+  target_guild_id: string | null;
+  target_division_number: number | null;
+  /** Libellé lisible (ex. Discord 1) + id si besoin. */
+  target_guild_label: string;
+  /** Dernier nom Discord connu pour le serveur cible + id. */
   guild_label: string;
   role_id: string | null;
   /** Salon privé équipe (équivalent active_channel_id en base). */
@@ -52,6 +56,12 @@ export interface AdminTeamsResponse {
   teams: AdminTeamRow[];
 }
 
+export interface AdminTargetGuildsMetaResponse {
+  guilds: { id: string; label: string }[];
+  division_min: number;
+  division_max: number;
+}
+
 export interface AdminGuildResourcesResponse {
   guild_id: string;
   roles: DiscordPickOption[];
@@ -59,6 +69,8 @@ export interface AdminGuildResourcesResponse {
 }
 
 export interface PatchTeamBody {
+  target_guild_id?: string | null;
+  target_division_number?: number | null;
   role_id?: string | null;
   private_channel_id?: string | null;
 }

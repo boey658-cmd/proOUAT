@@ -20,6 +20,10 @@ export interface TeamRow {
   division_number: number | null;
   division_group: string | null;
   current_guild_id: string | null;
+  /** Serveur Discord cible (affectation manuelle panel admin). */
+  target_guild_id: string | null;
+  /** Division cible entière (affectation manuelle). */
+  target_division_number: number | null;
   notes: string | null;
   created_at: string;
   updated_at: string;

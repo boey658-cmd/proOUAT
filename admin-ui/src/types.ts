@@ -26,7 +26,9 @@ export interface AdminTeamRow {
   team_api_id: string;
   team_name: string;
   team_status: string;
-  guild_id: string | null;
+  target_guild_id: string | null;
+  target_division_number: number | null;
+  target_guild_label: string;
   guild_label: string;
   role_id: string | null;
   private_channel_id: string | null;
@@ -34,6 +36,12 @@ export interface AdminTeamRow {
   channel_name: string | null;
   last_verified_at: string | null;
   verification: TeamVerification;
+}
+
+export interface AdminTargetGuildsMetaResponse {
+  guilds: { id: string; label: string }[];
+  division_min: number;
+  division_max: number;
 }
 
 export interface AdminGuildResourcesResponse {

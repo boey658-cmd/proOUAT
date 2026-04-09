@@ -16,9 +16,10 @@ export function insertTeam(row: TeamInsert): number {
     INSERT INTO teams (
       team_api_id, team_name, normalized_team_name, status,
       first_seen_at, last_seen_at, last_synced_at,
-      division_number, division_group, current_guild_id, notes,
+      division_number, division_group, current_guild_id,
+      target_guild_id, target_division_number, notes,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const info = stmt.run(
     row.team_api_id,
@@ -31,6 +32,8 @@ export function insertTeam(row: TeamInsert): number {
     row.division_number ?? null,
     row.division_group ?? null,
     row.current_guild_id ?? null,
+    row.target_guild_id ?? null,
+    row.target_division_number ?? null,
     row.notes ?? null,
     row.created_at,
     row.updated_at
@@ -59,7 +62,22 @@ export function findTeamByNormalizedName(normalizedName: string): TeamRow | null
 
 export function updateTeam(
   id: number,
-  updates: Partial<Pick<TeamRow, 'team_name' | 'normalized_team_name' | 'status' | 'last_seen_at' | 'last_synced_at' | 'division_number' | 'division_group' | 'current_guild_id' | 'notes'>>
+  updates: Partial<
+    Pick<
+      TeamRow,
+      | 'team_name'
+      | 'normalized_team_name'
+      | 'status'
+      | 'last_seen_at'
+      | 'last_synced_at'
+      | 'division_number'
+      | 'division_group'
+      | 'current_guild_id'
+      | 'target_guild_id'
+      | 'target_division_number'
+      | 'notes'
+    >
+  >
 ): void {
   const db = getDatabase();
   const updatedAt = now();
@@ -97,6 +115,14 @@ export function updateTeam(
   if (updates.current_guild_id !== undefined) {
     fields.push('current_guild_id = ?');
     values.push(updates.current_guild_id);
+  }
+  if (updates.target_guild_id !== undefined) {
+    fields.push('target_guild_id = ?');
+    values.push(updates.target_guild_id);
+  }
+  if (updates.target_division_number !== undefined) {
+    fields.push('target_division_number = ?');
+    values.push(updates.target_division_number);
   }
   if (updates.notes !== undefined) {
     fields.push('notes = ?');

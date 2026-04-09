@@ -11,6 +11,8 @@ export interface AdminTeamJoinRow {
   team_name: string;
   team_status: string;
   current_guild_id: string | null;
+  target_guild_id: string | null;
+  target_division_number: number | null;
   active_guild_id: string | null;
   active_role_id: string | null;
   active_channel_id: string | null;
@@ -23,6 +25,11 @@ export interface AdminTeamJoinRow {
   cached_channel_name: string | null;
 }
 
+export interface AdminTeamListFilters {
+  targetGuildId?: string;
+  targetDivisionNumber?: number;
+}
+
 const SELECT_ADMIN_JOIN = `
     SELECT
       t.id AS team_id,
@@ -30,6 +37,8 @@ const SELECT_ADMIN_JOIN = `
       t.team_name AS team_name,
       t.status AS team_status,
       t.current_guild_id AS current_guild_id,
+      t.target_guild_id AS target_guild_id,
+      t.target_division_number AS target_division_number,
       s.active_guild_id AS active_guild_id,
       s.active_role_id AS active_role_id,
       s.active_channel_id AS active_channel_id,
@@ -44,11 +53,31 @@ const SELECT_ADMIN_JOIN = `
     LEFT JOIN team_discord_state s ON s.team_id = t.id
 `;
 
-/** Liste toutes les équipes avec l’état Discord associé (LEFT JOIN). */
-export function findAllTeamsWithDiscordState(): AdminTeamJoinRow[] {
+const ORDER_CLAUSE =
+  ' ORDER BY (t.target_division_number IS NULL), t.target_division_number ASC, t.team_name COLLATE NOCASE ASC';
+
+/** Liste les équipes avec filtres optionnels (serveur / division cibles). */
+export function findAdminTeamJoinRows(filters?: AdminTeamListFilters): AdminTeamJoinRow[] {
   const db = getDatabase();
-  const stmt = db.prepare(`${SELECT_ADMIN_JOIN} ORDER BY t.id`);
-  return stmt.all() as AdminTeamJoinRow[];
+  const params: unknown[] = [];
+  let sql = SELECT_ADMIN_JOIN + ' WHERE 1=1';
+
+  if (filters?.targetGuildId?.trim()) {
+    sql += ' AND t.target_guild_id = ?';
+    params.push(filters.targetGuildId.trim());
+  }
+  if (filters?.targetDivisionNumber !== undefined) {
+    sql += ' AND t.target_division_number = ?';
+    params.push(filters.targetDivisionNumber);
+  }
+
+  sql += ORDER_CLAUSE;
+  return db.prepare(sql).all(...params) as AdminTeamJoinRow[];
+}
+
+/** Liste complète (sans filtre), triée — utile pour scripts ou compat. */
+export function findAllTeamsWithDiscordState(): AdminTeamJoinRow[] {
+  return findAdminTeamJoinRows();
 }
 
 /** Une équipe + état Discord (pour opérations ciblées). */
