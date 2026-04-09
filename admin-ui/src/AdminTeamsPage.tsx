@@ -250,13 +250,12 @@ export function AdminTeamsPage() {
                   rowAction !== null && rowAction.teamId === row.id && rowAction.kind === 'save';
                 const rowVerifying =
                   rowAction !== null && rowAction.teamId === row.id && rowAction.kind === 'verify';
-                const otherRowBusy = rowAction !== null && rowAction.teamId !== row.id;
                 const bg = rowBackgroundForStatus(row.verification.level);
 
+                /** globalBusy couvre verify all + action sur une ligne ; on bloque aussi les autres lignes si une est en édition. */
                 const disableModify =
-                  busyVerifyAll || otherRowBusy || (editingId !== null && editingId !== row.id);
-                const disableVerify =
-                  busyVerifyAll || busyRow !== null || editingId !== null;
+                  globalBusy || (editingId !== null && editingId !== row.id);
+                const disableVerify = globalBusy || editingId !== null;
 
                 return (
                   <tr key={row.id} style={{ background: bg }}>
