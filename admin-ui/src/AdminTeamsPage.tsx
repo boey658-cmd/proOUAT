@@ -12,6 +12,9 @@ import {
 import { rowBackgroundForStatus, statusBadgeStyle } from './statusStyle';
 import { formatLastVerifiedLine } from './formatVerified';
 
+/** Valeur du select « Serveur actif » = toutes les équipes (sans filtre API `target_guild_id`). */
+const ALL_SERVERS = '';
+
 type EditingState = {
   targetGuildId: string;
   divisionStr: string;
@@ -47,12 +50,22 @@ function divisionOptions(min: number, max: number): number[] {
   return o;
 }
 
+function teamMatchesSearch(row: AdminTeamRow, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (q === '') return true;
+  return (
+    row.team_name.toLowerCase().includes(q) || row.team_api_id.toLowerCase().includes(q)
+  );
+}
+
 /** Page principale : affectation serveur / division + édition rôle/salon + vérifs limitées au scope. */
 export function AdminTeamsPage() {
   const [meta, setMeta] = useState<AdminTargetGuildsMetaResponse | null>(null);
   const [metaErr, setMetaErr] = useState<string | null>(null);
-  const [selectedServerId, setSelectedServerId] = useState<string>('');
+  /** '' = « Tous » (pas de target_guild_id en query API). */
+  const [selectedServerId, setSelectedServerId] = useState<string>(ALL_SERVERS);
   const [divisionScope, setDivisionScope] = useState<number | 'all'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const [rows, setRows] = useState<AdminTeamRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,15 +86,13 @@ export function AdminTeamsPage() {
   );
 
   const globalBusy = busyVerifyAll || rowAction !== null;
+  const isAllServers = selectedServerId === ALL_SERVERS;
 
   useEffect(() => {
     void (async () => {
       try {
         const m = await fetchTargetGuildsMeta();
         setMeta(m);
-        if (m.guilds.length > 0) {
-          setSelectedServerId((cur) => (cur === '' ? m.guilds[0]!.id : cur));
-        }
       } catch (e) {
         setMetaErr(e instanceof Error ? e.message : String(e));
       }
@@ -90,18 +101,22 @@ export function AdminTeamsPage() {
 
   const load = useCallback(async () => {
     setError(null);
-    if (!selectedServerId) {
-      setRows([]);
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     try {
-      const teams = await fetchTeams({
-        targetGuildId: selectedServerId,
-        targetDivisionNumber: divisionScope === 'all' ? undefined : divisionScope,
-      });
-      setRows(teams);
+      if (isAllServers) {
+        const teams = await fetchTeams(undefined);
+        if (divisionScope !== 'all') {
+          setRows(teams.filter((r) => r.target_division_number === divisionScope));
+        } else {
+          setRows(teams);
+        }
+      } else {
+        const teams = await fetchTeams({
+          targetGuildId: selectedServerId,
+          targetDivisionNumber: divisionScope === 'all' ? undefined : divisionScope,
+        });
+        setRows(teams);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -113,32 +128,51 @@ export function AdminTeamsPage() {
     void load();
   }, [load]);
 
-  const counts = useMemo(() => countByStatus(rows), [rows]);
-  const filteredRows = useMemo(() => {
-    if (statusFilter === 'all') return rows;
-    return rows.filter((r) => r.verification.level === statusFilter);
-  }, [rows, statusFilter]);
+  /**
+   * 1. Scope serveur + division (données API ou filtre division local si « Tous » + div précise).
+   * Ici `rows` est déjà prêt pour un serveur précis ; en mode « Tous », `load` a déjà appliqué la division si besoin.
+   */
+  const scopedRows = rows;
 
+  const counts = useMemo(() => countByStatus(scopedRows), [scopedRows]);
+
+  /** 2. Filtre statut */
+  const afterStatus = useMemo(() => {
+    if (statusFilter === 'all') return scopedRows;
+    return scopedRows.filter((r) => r.verification.level === statusFilter);
+  }, [scopedRows, statusFilter]);
+
+  /** 3. Recherche nom / api id */
+  const afterSearch = useMemo(() => {
+    return afterStatus.filter((r) => teamMatchesSearch(r, searchQuery));
+  }, [afterStatus, searchQuery]);
+
+  /** 4. Tri division puis nom */
   const sortedRows = useMemo(() => {
-    return [...filteredRows].sort((a, b) => {
+    return [...afterSearch].sort((a, b) => {
       const da = a.target_division_number ?? 9999;
       const db = b.target_division_number ?? 9999;
       if (da !== db) return da - db;
       return a.team_name.localeCompare(b.team_name, 'fr');
     });
-  }, [filteredRows]);
+  }, [afterSearch]);
+
+  const defaultGuildForResources =
+    meta && meta.guilds.length > 0 ? meta.guilds[0]!.id : '';
 
   const startEdit = async (row: AdminTeamRow) => {
     setError(null);
-    const gid = row.target_guild_id ?? selectedServerId;
+    const gid = row.target_guild_id ?? (selectedServerId !== ALL_SERVERS ? selectedServerId : defaultGuildForResources);
     if (!gid) {
-      setError('Assignez un serveur cible à cette équipe (ou sélectionnez un serveur en haut de page).');
+      setError(
+        'Aucun serveur configuré pour charger les rôles/salons. Définissez les guilds côté bot ou choisissez un serveur cible dans le formulaire.'
+      );
       return;
     }
     if (globalBusy) return;
     setEditingId(row.id);
     setDraft({
-      targetGuildId: row.target_guild_id ?? selectedServerId,
+      targetGuildId: row.target_guild_id ?? (selectedServerId !== ALL_SERVERS ? selectedServerId : defaultGuildForResources),
       divisionStr: row.target_division_number != null ? String(row.target_division_number) : '',
       roleId: row.role_id ?? '',
       channelId: row.private_channel_id ?? '',
@@ -160,7 +194,6 @@ export function AdminTeamsPage() {
     }
   };
 
-  /** Quand on change le serveur cible dans le formulaire, recharger les listes rôles/salons. */
   const reloadResourcesForGuild = async (guildId: string, row: AdminTeamRow) => {
     if (!guildId.trim()) {
       setGuildResources(null);
@@ -230,7 +263,7 @@ export function AdminTeamsPage() {
   };
 
   const onVerifyAll = async () => {
-    if (!selectedServerId) return;
+    if (isAllServers || !selectedServerId) return;
     setError(null);
     setBusyVerifyAll(true);
     try {
@@ -268,6 +301,21 @@ export function AdminTeamsPage() {
   const divMin = meta?.division_min ?? 1;
   const divMax = meta?.division_max ?? 12;
 
+  const emptyListMessage = useMemo(() => {
+    if (loading || error) return null;
+    if (rows.length === 0) {
+      if (isAllServers) return 'Aucune équipe en base.';
+      return 'Aucune équipe pour ce serveur (vérifiez aussi le filtre division).';
+    }
+    if (sortedRows.length === 0) {
+      if (searchQuery.trim()) return 'Aucune équipe ne correspond à la recherche.';
+      if (statusFilter !== 'all') return 'Aucune équipe pour ce filtre de statut.';
+      if (divisionScope !== 'all') return 'Aucune équipe pour cette division dans le scope actuel.';
+      return 'Aucune équipe à afficher.';
+    }
+    return null;
+  }, [loading, error, rows.length, sortedRows.length, isAllServers, searchQuery, statusFilter, divisionScope]);
+
   return (
     <div style={{ padding: 24, maxWidth: 1480, margin: '0 auto' }}>
       <header style={{ marginBottom: 16, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
@@ -288,8 +336,9 @@ export function AdminTeamsPage() {
           <select
             value={selectedServerId}
             onChange={(e) => setSelectedServerId(e.target.value)}
-            disabled={globalBusy || !meta || meta.guilds.length === 0}
+            disabled={globalBusy || !meta}
           >
+            <option value={ALL_SERVERS}>Tous</option>
             {meta?.guilds.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.label}
@@ -305,7 +354,7 @@ export function AdminTeamsPage() {
               const v = e.target.value;
               setDivisionScope(v === 'all' ? 'all' : Number.parseInt(v, 10));
             }}
-            disabled={globalBusy || !selectedServerId}
+            disabled={globalBusy}
           >
             <option value="all">Toutes</option>
             {divisionOptions(divMin, divMax).map((n) => (
@@ -315,11 +364,23 @@ export function AdminTeamsPage() {
             ))}
           </select>
         </label>
+        <label className="muted" style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 240px' }}>
+          Recherche
+          <input
+            type="search"
+            className="search-input"
+            placeholder="Rechercher une équipe…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            disabled={globalBusy}
+            autoComplete="off"
+          />
+        </label>
         <button
           type="button"
           className="primary"
           onClick={() => void load()}
-          disabled={loading || globalBusy || editingId !== null || !selectedServerId}
+          disabled={loading || globalBusy || editingId !== null}
         >
           Actualiser
         </button>
@@ -328,8 +389,14 @@ export function AdminTeamsPage() {
           className="primary"
           onClick={() => void onVerifyAll()}
           disabled={
-            loading || busyVerifyAll || globalBusy || editingId !== null || !selectedServerId
+            loading ||
+            busyVerifyAll ||
+            globalBusy ||
+            editingId !== null ||
+            isAllServers ||
+            !selectedServerId
           }
+          title={isAllServers ? 'Choisissez un serveur précis pour lancer une vérification ciblée' : undefined}
         >
           {busyVerifyAll ? 'Vérification…' : 'Vérifier tout (scope actif)'}
         </button>
@@ -345,7 +412,7 @@ export function AdminTeamsPage() {
       {error && <p className="err">{error}</p>}
       {loading && <p className="muted">Chargement…</p>}
 
-      {!loading && selectedServerId && rows.length > 0 && (
+      {!loading && scopedRows.length > 0 && (
         <div style={{ marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           {(
             [
@@ -368,9 +435,7 @@ export function AdminTeamsPage() {
         </div>
       )}
 
-      {!loading && !error && selectedServerId && rows.length === 0 && (
-        <p className="muted">Aucune équipe pour ce serveur (et cette division si filtrée).</p>
-      )}
+      {!loading && emptyListMessage && <p className="muted">{emptyListMessage}</p>}
 
       {!loading && sortedRows.length > 0 && (
         <div style={{ overflowX: 'auto' }}>

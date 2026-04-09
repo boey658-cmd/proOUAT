@@ -51,6 +51,22 @@ select {
   padding: 6px 8px;
   font-size: 13px;
 }
+
+input.search-input {
+  min-width: 200px;
+  max-width: 320px;
+  flex: 1;
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+input.search-input::placeholder {
+  color: #64748b;
+}
 .muted {
   color: #94a3b8;
   font-size: 12px;
