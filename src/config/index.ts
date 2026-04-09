@@ -2,6 +2,7 @@
  * Export central de la configuration.
  */
 
+export * from './adminApi.js';
 export * from './api.js';
 export * from './discord.js';
 export * from './channels.js';

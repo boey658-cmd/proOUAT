@@ -76,6 +76,9 @@ export interface PendingActionRow {
   updated_at: string;
 }
 
+/** Niveau persisté par le panel admin (scan Discord explicite). */
+export type TeamVerificationLevelStored = 'ok' | 'warning' | 'error' | 'unknown';
+
 export interface TeamDiscordStateRow {
   id: number;
   team_id: number;
@@ -84,6 +87,14 @@ export interface TeamDiscordStateRow {
   active_channel_id: string | null;
   active_category_id: string | null;
   last_membership_sync_at: string | null;
+  verification_level: TeamVerificationLevelStored;
+  verification_label: string | null;
+  /** JSON : même structure que TeamVerificationFlags côté API admin. */
+  verification_issues: string | null;
+  last_verified_at: string | null;
+  cached_guild_name: string | null;
+  cached_role_name: string | null;
+  cached_channel_name: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -6,11 +6,15 @@ import 'dotenv/config';
 import { openDatabase, runMigrations, closeDatabase } from './db/index.js';
 import { createAndConnectClient, destroyClient } from './discord/client.js';
 import { stopJobs } from './bootstrap/index.js';
+import { closeAdminServer, startAdminServer } from './admin/server.js';
 import { getDiscordGuildId1, getDiscordGuildId2 } from './config/index.js';
 
 async function shutdown(): Promise<void> {
   console.info('Arrêt du bot');
   stopJobs();
+  await closeAdminServer().catch((e) =>
+    console.error('[admin] fermeture HTTP', e instanceof Error ? e.message : e)
+  );
   await destroyClient();
   closeDatabase();
   process.exit(0);
@@ -46,7 +50,8 @@ async function main(): Promise<void> {
     });
   });
 
-  await createAndConnectClient();
+  const client = await createAndConnectClient();
+  startAdminServer(client);
 
   // Le client Discord garde le processus actif ; pas d'appel à process.exit().
 }

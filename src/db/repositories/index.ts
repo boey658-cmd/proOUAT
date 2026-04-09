@@ -2,6 +2,7 @@
  * Export central des repositories.
  */
 
+export * from './adminTeams.js';
 export * from './teams.js';
 export * from './players.js';
 export * from './discordResources.js';
