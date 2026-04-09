@@ -1,4 +1,9 @@
-import type { AdminGuildResourcesResponse, AdminTeamRow, AdminTargetGuildsMetaResponse } from './types';
+import type {
+  AdminGuildResourcesResponse,
+  AdminTeamRow,
+  AdminTargetGuildsMetaResponse,
+  BulkAssignTeamsResponse,
+} from './types';
 import { normalizeTargetGuildIdForApi } from './targetGuildApi';
 
 function authHeaders(): HeadersInit {
@@ -125,4 +130,25 @@ export async function patchTeam(teamId: number, body: PatchTeamPayload): Promise
   });
   const data = await handleJson<{ team: AdminTeamRow }>(res);
   return data.team;
+}
+
+export async function bulkAssignTeams(payload: {
+  target_guild_id: string;
+  target_division_number: number;
+  team_names_text: string;
+}): Promise<BulkAssignTeamsResponse> {
+  const gid = normalizeTargetGuildIdForApi(payload.target_guild_id);
+  if (!gid) {
+    throw new Error('Serveur cible invalide pour l’assignation en lot');
+  }
+  const res = await fetch('/admin/teams/bulk-assign', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({
+      target_guild_id: gid,
+      target_division_number: payload.target_division_number,
+      team_names_text: payload.team_names_text,
+    }),
+  });
+  return handleJson<BulkAssignTeamsResponse>(res);
 }

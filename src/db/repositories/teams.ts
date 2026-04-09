@@ -60,6 +60,24 @@ export function findTeamByNormalizedName(normalizedName: string): TeamRow | null
   return (stmt.get(normalizedName.trim()) as TeamRow | undefined) ?? null;
 }
 
+/** Toutes les équipes avec ce `team_name` exact (trim appliqué côté appelant si besoin). */
+export function findTeamsByExactTeamName(teamName: string): TeamRow[] {
+  if (!teamName || typeof teamName !== 'string') return [];
+  const db = getDatabase();
+  const stmt = db.prepare('SELECT * FROM teams WHERE team_name = ? ORDER BY id');
+  return stmt.all(teamName) as TeamRow[];
+}
+
+/** Toutes les équipes partageant la même clé `normalized_team_name`. */
+export function findTeamsByNormalizedTeamName(normalizedName: string): TeamRow[] {
+  if (!normalizedName || typeof normalizedName !== 'string') return [];
+  const db = getDatabase();
+  const t = normalizedName.trim();
+  if (t === '') return [];
+  const stmt = db.prepare('SELECT * FROM teams WHERE normalized_team_name = ? ORDER BY id');
+  return stmt.all(t) as TeamRow[];
+}
+
 export function updateTeam(
   id: number,
   updates: Partial<

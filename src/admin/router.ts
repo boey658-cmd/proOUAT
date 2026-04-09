@@ -17,6 +17,7 @@ import { isValidDiscordSnowflake } from './verifyTeamDiscord.js';
 import { patchAdminTeam } from './patchTeamAdmin.js';
 import { getTargetGuildOptions, isAllowedAdminTargetGuildId } from './targetGuilds.js';
 import { getTargetDivisionMax, getTargetDivisionMin } from './targetDivision.js';
+import { bulkAssignTeamsByPastedNames } from './bulkAssignTeams.js';
 
 function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   const expected = getAdminApiToken();
@@ -107,6 +108,21 @@ export function createAdminRouter(client: Client<true>): Router {
       res.json({ teams });
     } catch (e) {
       console.error('[admin] GET /teams', e);
+      res.status(500).json({ error: 'Erreur serveur' });
+    }
+  });
+
+  /** Affectation en lot : serveur + division à partir d’une liste de noms collés. */
+  r.post('/teams/bulk-assign', (req: Request, res: Response) => {
+    try {
+      const out = bulkAssignTeamsByPastedNames(req.body);
+      if (!out.ok) {
+        res.status(out.status).json({ error: out.error });
+        return;
+      }
+      res.json(out.result);
+    } catch (e) {
+      console.error('[admin] POST /teams/bulk-assign', e);
       res.status(500).json({ error: 'Erreur serveur' });
     }
   });

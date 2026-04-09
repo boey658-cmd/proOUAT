@@ -51,3 +51,22 @@ export interface AdminGuildResourcesResponse {
 }
 
 export type StatusFilter = 'all' | 'ok' | 'warning' | 'error' | 'unknown';
+
+export interface BulkAssignUpdatedTeamBrief {
+  id: number;
+  team_name: string;
+  team_api_id: string;
+}
+
+export interface BulkAssignAmbiguousName {
+  input: string;
+  matching_ids: number[];
+}
+
+export interface BulkAssignTeamsResponse {
+  updated_count: number;
+  updated_teams: BulkAssignUpdatedTeamBrief[];
+  not_found_names: string[];
+  ambiguous_names: BulkAssignAmbiguousName[];
+  parsed_names: string[];
+}

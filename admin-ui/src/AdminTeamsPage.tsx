@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { AdminTargetGuildsMetaResponse, AdminTeamRow, DiscordPickOption, StatusFilter } from './types';
+import type {
+  AdminTargetGuildsMetaResponse,
+  AdminTeamRow,
+  BulkAssignTeamsResponse,
+  DiscordPickOption,
+  StatusFilter,
+} from './types';
 import {
+  bulkAssignTeams,
   fetchGuildResources,
   fetchTargetGuildsMeta,
   fetchTeams,
@@ -81,12 +88,19 @@ export function AdminTeamsPage() {
   const [rowAction, setRowAction] = useState<{ teamId: number; kind: 'save' | 'verify' } | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
+  const [bulkGuildId, setBulkGuildId] = useState('');
+  const [bulkDivision, setBulkDivision] = useState(1);
+  const [bulkText, setBulkText] = useState('');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState<BulkAssignTeamsResponse | null>(null);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+
   const tokenOk = useMemo(
     () => Boolean((import.meta.env.VITE_ADMIN_API_TOKEN ?? '').trim()),
     []
   );
 
-  const globalBusy = busyVerifyAll || rowAction !== null;
+  const globalBusy = busyVerifyAll || rowAction !== null || bulkBusy;
   const isAllServers = selectedServerId === ALL_SERVERS;
 
   useEffect(() => {
@@ -99,6 +113,19 @@ export function AdminTeamsPage() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (meta?.guilds.length && !bulkGuildId) {
+      setBulkGuildId(meta.guilds[0]!.id);
+    }
+  }, [meta, bulkGuildId]);
+
+  useEffect(() => {
+    if (!meta) return;
+    setBulkDivision((prev) =>
+      prev < meta.division_min || prev > meta.division_max ? meta.division_min : prev
+    );
+  }, [meta]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -306,6 +333,31 @@ export function AdminTeamsPage() {
     }
   };
 
+  const runBulkAssign = async () => {
+    if (!meta?.guilds.length) return;
+    setBulkError(null);
+    setBulkResult(null);
+    const gid = normalizeTargetGuildIdForApi(bulkGuildId);
+    if (!gid) {
+      setBulkError('Choisissez un serveur cible valide (Discord 1 ou 2).');
+      return;
+    }
+    setBulkBusy(true);
+    try {
+      const res = await bulkAssignTeams({
+        target_guild_id: gid,
+        target_division_number: bulkDivision,
+        team_names_text: bulkText,
+      });
+      setBulkResult(res);
+      await load();
+    } catch (e) {
+      setBulkError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   const filterBtnStyle = (active: boolean): CSSProperties => ({
     opacity: active ? 1 : 0.75,
     borderColor: active ? '#60a5fa' : '#475569',
@@ -342,6 +394,156 @@ export function AdminTeamsPage() {
           Aucun serveur cible : définissez <code>DISCORD_GUILD_ID_1</code> / <code>DISCORD_GUILD_ID_2</code> côté
           bot.
         </p>
+      )}
+
+      {meta && meta.guilds.length > 0 && (
+        <section
+          className="bulk-assign-panel"
+          style={{
+            marginBottom: 20,
+            padding: 16,
+            border: '1px solid #334155',
+            borderRadius: 8,
+            background: '#0f172a',
+          }}
+        >
+          <h2 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 600 }}>Assignation en lot</h2>
+          <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+            Collez des noms depuis un tableur (tabulations ou lignes). Correspondance exacte sur le nom, puis sans
+            tenir compte de la casse — les ambiguïtés ne sont pas assignées.
+          </p>
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 12,
+              alignItems: 'flex-end',
+              marginBottom: 12,
+            }}
+          >
+            <label className="muted" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              Serveur cible
+              <select
+                value={bulkGuildId}
+                onChange={(e) => setBulkGuildId(e.target.value)}
+                disabled={globalBusy}
+              >
+                {meta.guilds.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="muted" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              Division cible
+              <select
+                value={bulkDivision}
+                onChange={(e) => setBulkDivision(Number.parseInt(e.target.value, 10))}
+                disabled={globalBusy}
+              >
+                {divisionOptions(divMin, divMax).map((n) => (
+                  <option key={n} value={n}>
+                    Div {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => void runBulkAssign()}
+              disabled={globalBusy || editingId !== null}
+            >
+              {bulkBusy ? 'Assignation…' : 'Assigner la liste'}
+            </button>
+          </div>
+          <label className="muted" style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
+            Liste des équipes
+            <textarea
+              className="bulk-assign-textarea"
+              rows={5}
+              placeholder="Collez ici des noms d’équipes (retours ligne ou tabulations)"
+              value={bulkText}
+              onChange={(e) => setBulkText(e.target.value)}
+              disabled={globalBusy}
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                fontFamily: 'inherit',
+                fontSize: 13,
+                padding: 8,
+                borderRadius: 6,
+                border: '1px solid #475569',
+                background: '#1e293b',
+                color: '#e2e8f0',
+              }}
+            />
+          </label>
+          {bulkError && <p className="err" style={{ marginBottom: 0 }}>{bulkError}</p>}
+          {bulkResult && (
+            <div style={{ marginTop: 14, fontSize: 13 }}>
+              <p style={{ margin: '0 0 8px', fontWeight: 600 }}>
+                Résumé : {bulkResult.updated_count} équipe{bulkResult.updated_count !== 1 ? 's' : ''} mise
+                {bulkResult.updated_count !== 1 ? 's' : ''} à jour
+                {bulkResult.parsed_names.length > 0
+                  ? ` — ${bulkResult.parsed_names.length} nom${bulkResult.parsed_names.length !== 1 ? 's' : ''} distinct${bulkResult.parsed_names.length !== 1 ? 's' : ''} dans le collage`
+                  : ''}
+                .
+              </p>
+              {bulkResult.updated_teams.length > 0 && (
+                <details open style={{ marginBottom: 8 }}>
+                  <summary className="muted" style={{ cursor: 'pointer' }}>
+                    Équipes mises à jour ({bulkResult.updated_teams.length})
+                  </summary>
+                  <ul
+                    style={{
+                      margin: '8px 0 0',
+                      paddingLeft: 20,
+                      maxHeight: 180,
+                      overflow: 'auto',
+                    }}
+                  >
+                    {bulkResult.updated_teams.map((t) => (
+                      <li key={t.id}>
+                        {t.team_name} <span className="muted">(id {t.id})</span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {bulkResult.not_found_names.length > 0 && (
+                <details style={{ marginBottom: 8 }}>
+                  <summary className="err" style={{ cursor: 'pointer' }}>
+                    Introuvables ({bulkResult.not_found_names.length})
+                  </summary>
+                  <ul style={{ margin: '8px 0 0', paddingLeft: 20, maxHeight: 140, overflow: 'auto' }}>
+                    {bulkResult.not_found_names.map((n) => (
+                      <li key={n}>{n}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {bulkResult.ambiguous_names.length > 0 && (
+                <details style={{ marginBottom: 0 }}>
+                  <summary className="err" style={{ cursor: 'pointer' }}>
+                    Ambigus — non assignés ({bulkResult.ambiguous_names.length})
+                  </summary>
+                  <ul style={{ margin: '8px 0 0', paddingLeft: 20, maxHeight: 140, overflow: 'auto' }}>
+                    {bulkResult.ambiguous_names.map((a) => (
+                      <li key={a.input}>
+                        {a.input}{' '}
+                        <span className="muted">
+                          (ids : {a.matching_ids.join(', ')})
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
+        </section>
       )}
 
       <div style={{ marginBottom: 16, display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>

@@ -78,3 +78,29 @@ export interface PatchTeamBody {
 export interface VerifyTeamsResponse {
   teams: AdminTeamRow[];
 }
+
+export interface BulkAssignTeamsRequestBody {
+  target_guild_id: string;
+  target_division_number: number;
+  team_names_text: string;
+}
+
+export interface BulkAssignUpdatedTeamBrief {
+  id: number;
+  team_name: string;
+  team_api_id: string;
+}
+
+export interface BulkAssignAmbiguousName {
+  /** Nom tel que collé (après trim de la cellule). */
+  input: string;
+  matching_ids: number[];
+}
+
+export interface BulkAssignTeamsResponse {
+  updated_count: number;
+  updated_teams: BulkAssignUpdatedTeamBrief[];
+  not_found_names: string[];
+  ambiguous_names: BulkAssignAmbiguousName[];
+  parsed_names: string[];
+}
